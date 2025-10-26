@@ -526,7 +526,7 @@ export default function DashboardPage() {
               </label>
               {uploadingId && (
                 <div className="flex items-center gap-2 text-sm text-neutral-600">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Processing #{uploadingId}
+                  <Loader2 className="w-[10px] h-[10px] animate-spin" />
                 </div>
               )}
             </div>
@@ -579,7 +579,7 @@ export default function DashboardPage() {
 
                 <div className="pr-32">
                   <div className="flex items-center gap-2 text-sm mb-2">
-                    <span className="font-semibold text-black">#{inc.id}</span>
+                    {/* <span className="font-semibold text-black">#{inc.id}</span> */}
                     <span className="text-neutral-500">{new Date(inc.createdAt || Date.now()).toLocaleString()}</span>
                   </div>
 
@@ -588,9 +588,7 @@ export default function DashboardPage() {
                       <span className="text-neutral-500">Type:</span> <span className="text-black">{inc.emergencyType || "Unknown"}</span>
                       {typeof inc.confidence === "number" && <span className="ml-2 text-black">({Math.round((inc.confidence || 0) * 100)}%)</span>}
                     </div>
-                    <div className="truncate">
-                      <span className="text-neutral-500">Transcript:</span> <span className="text-black">{inc.transcript || "—"}</span>
-                    </div>
+
                     <div>
                       <span className="text-neutral-500">Location:</span>{" "}
                       {inc.location ? (
@@ -598,6 +596,15 @@ export default function DashboardPage() {
                       ) : (
                         <span className="text-black">—</span>
                       )}
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-neutral-500 shrink-0">Transcript:</span>
+                      <span
+                        className="text-black flex-1 min-w-0 truncate"
+                        title={inc.transcript || "—"}  // shows full text on hover
+                      >
+                        {inc.transcript || "—"}
+                      </span>
                     </div>
                     {inc.flags && (
                       <div className="text-xs text-neutral-600 mt-1">
