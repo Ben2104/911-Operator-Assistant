@@ -51,10 +51,7 @@ cd marina-hacks2
 
    ```bash
    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your-google-maps-js-key>
-   LOCATION_API_URL=http://127.0.0.1:8000/location
    ```
-
-   `LOCATION_API_URL` lets the dashboard forward uploads to your FastAPI instance. Omit it if you keep the backend default (`http://127.0.0.1:8000/location`).
 
 3. **Run the dev server**
 
@@ -101,7 +98,7 @@ cd marina-hacks2
 
    - `GOOGLEGEM_API_KEY` powers incident parsing via Gemini.
    - `GOOGLEMAP_API_KEY` geocodes the parsed address.
-   - Twilio credentials are only required if you POST call recordings directly from Twilio; otherwise you can omit them.
+   - Twilio credentials are only required if you POST call recordings directly from Twilio; otherwise, you can omit them.
 
 4. **Run the API**
 
@@ -117,35 +114,18 @@ cd marina-hacks2
    | `/incoming` | POST | Twilio entry point that records callers |
    | `/recording-complete` | POST | Twilio recording callback |
 
-## 4. Connecting both services
+5. **Connecting both services**
 
 1. Start the backend (`uvicorn ...`) so `/location` is reachable at `http://127.0.0.1:8000/location`.
-2. In `frontend/.env.local`, set `LOCATION_API_URL` to that endpoint.
-3. Run `npm run dev` (frontend). Manual uploads and live recordings will be forwarded to the FastAPI service, and the confirmed incidents will appear on the map.
+2. Run `npm run dev` (frontend). Manual uploads and live recordings will be forwarded to the FastAPI service, and the confirmed incidents will appear on the map.
 
-## 5. Helpful scripts
 
-| Command | Location | Purpose |
-|---------|----------|---------|
-| `npm run dev` | `frontend/` | Start Next.js dev server |
-| `npm run lint` | `frontend/` | Lint React/Next files |
-| `npm run build` | `frontend/` | Production build |
-| `uvicorn server:app --reload` | `back_end/` | Start API with auto-reload |
-
-## 6. Troubleshooting
+6. **Troubleshooting**
 
 - **Blank map / console warning**: Ensure `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is set and has Maps JavaScript enabled.
 - **`Incident not found` when confirming manual entries**: keep both frontend and backend running so the in-memory store can accept new confirmations.
 - **`torch` install failures**: make sure you’re using Python 3.11+ and upgrade `pip`; Apple Silicon users might need `pip install torch==2.2.2` with the `--index-url https://download.pytorch.org/whl/cpu`.
 - **Large audio uploads fail**: install `ffmpeg` so `faster-whisper` can decode more formats reliably.
 
-## 7. Contributing
-
-1. Fork or create a feature branch.
-2. Keep frontend and backend changes isolated when possible.
-3. Run `npm run lint` and exercise the dashboard manually.
-4. Submit a PR with screenshots or steps to verify.
-
----
 
 Questions or ideas? Open an issue or reach out to the Marina Hacks 911 Ops team. Stay safe out there! 🚨
