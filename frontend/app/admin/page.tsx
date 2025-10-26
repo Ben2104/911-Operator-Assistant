@@ -124,6 +124,15 @@ export default function DashboardPage() {
   const [isConfirmingSelected, setIsConfirmingSelected] = useState(false);
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
 
+  // Track which incidents the operator dismissed (so they don't come back)
+  const dismissedIdsRef = useRef<Set<string>>(new Set());
+
+  // Track polling intervals per incident id so we can cancel them
+  const pollTimersRef = useRef<Map<string, number>>(new Map());
+
+  // Tiny state bump to force a re-render when we mutate dismissed set
+  const [, force] = useState(0);
+  
   // Load Google Maps
   useEffect(() => {
     let cancelled = false;
@@ -165,11 +174,17 @@ export default function DashboardPage() {
       if (!res.ok) return;
       const data: Incident[] = await res.json();
       setIncidents((prev) => {
+        // Keep local manual entries that aren't in server data
         const manual = prev.filter(
           (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
         );
-        return [...manual, ...data];
+
+        const merged = [...manual, ...data];
+
+        // Drop anything the operator dismissed
+        return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
       });
+
     } catch (e) {
       console.error(e);
     }
@@ -341,9 +356,20 @@ export default function DashboardPage() {
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
       };
-      mediaRecorder.onstop = () => {
-        setAudioChunks(chunks);
-      };
+    // ⬇️ Auto-upload as soon as recording stops
+      mediaRecorder.onstop = async () => {
+        try {
+          const blob = new Blob(chunks, { type: "audio/webm" });
+          // optional: name matches file-upload flow
+          await uploadBlob(blob, `call-${Date.now()}.webm`);
+        } catch (err) {
+          console.error("Auto-upload failed:", err);
+          setUploadError("Auto-upload failed. Try again.");
+        } finally {
+          setAudioChunks([]); // not needed anymore, but keep tidy
+        }
+    };
+
       mediaRecorder.start();
       setRecorder(mediaRecorder);
       setIsRecording(true);
@@ -385,22 +411,25 @@ export default function DashboardPage() {
           try {
             const data = JSON.parse(xhr.responseText);
             const id = data.id as string;
-            setUploadingId(id);
+
+            // If no backend, don't keep the spinner alive:
+            // setUploadingId(id); pollJob(id);  <-- remove these lines
             setUploadProgress(null);
             setSelectedUploadName(null);
-            pollJob(id);
-            resolve({ id });
+
+            // client-only: fake a brief "processing" then clear (optional)
+            setUploadingId(id);
+            setTimeout(() => setUploadingId((curr) => (curr === id ? null : curr)), 1200);
           } catch (err) {
             setUploadError("Invalid server response");
             setUploadProgress(null);
-            reject(err);
           }
         } else {
           setUploadError(`Upload failed (${xhr.status})`);
           setUploadProgress(null);
-          reject(new Error(`Upload failed (${xhr.status})`));
         }
       };
+
 
       xhr.onerror = () => {
         setUploadError("Network error during upload");
@@ -430,13 +459,18 @@ export default function DashboardPage() {
     let attempts = 0;
     const maxAttempts = 120; // 10 min @ 5s
     const interval = 5000;
+
     const timer = setInterval(async () => {
       attempts++;
+
       try {
         const res = await fetch(`/api/calls/${id}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          // optional: clear on repeated failures; we’ll clear on timeout below anyway
+          return;
+        }
         const data: Incident = await res.json();
-        // Merge into incidents list
+
         setIncidents((prev) => {
           const idx = prev.findIndex((p) => p.id === data.id);
           const next = [...prev];
@@ -444,18 +478,28 @@ export default function DashboardPage() {
           else next.unshift(data);
           return next;
         });
-        if (data.status === "needs_confirmation" && cpuMode) {
-          // Wait for operator confirmation
-        } else if (data.status === "done" && data.location) {
-          setUploadingId(null);
+
+        // ⬅️ Clear spinner for both terminal states
+        if (data.status === "needs_confirmation" || data.status === "done") {
+          setUploadingId((curr) => (curr === id ? null : curr));
+        }
+
+        // Stop polling once it's done (or keep if you need follow-up updates)
+        if (data.status === "done") {
           clearInterval(timer);
         }
       } catch (e) {
         console.error(e);
       }
-      if (attempts >= maxAttempts) clearInterval(timer);
+
+      if (attempts >= maxAttempts) {
+        clearInterval(timer);
+        // ⬅️ Also clear spinner on timeout so it doesn’t spin forever
+        setUploadingId((curr) => (curr === id ? null : curr));
+      }
     }, interval);
   };
+
 
   const confirmIncident = async (id: string): Promise<Incident | null> => {
     try {
@@ -466,11 +510,14 @@ export default function DashboardPage() {
       });
       if (!res.ok) throw new Error("Confirmation failed");
       const data: Incident = await res.json();
+
       setIncidents((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
-      if (pendingManualId === id) {
-        setPendingManualId(null);
-      }
       setSelectedIncident((current) => (current && current.id === id ? { ...current, ...data } : current));
+
+      // ⬅️ spinner off once we reach a confirmed state
+      setUploadingId((curr) => (curr === id ? null : curr));
+
+      if (pendingManualId === id) setPendingManualId(null);
       return data;
     } catch (err) {
       console.error(err);
@@ -512,10 +559,25 @@ export default function DashboardPage() {
     if (!selectedIncident) return;
     setIsDeletingSelected(true);
     setSelectedActionError(null);
-    setIncidents((prev) => prev.filter((inc) => inc.id !== selectedIncident.id));
-    if (pendingManualId === selectedIncident.id) {
-      setPendingManualId(null);
+
+    const id = selectedIncident.id;
+
+    // 1) remember dismissal
+    dismissedIdsRef.current.add(id);
+    // force a re-render (since Set mutation isn’t reactive)
+    force((v) => v + 1);
+
+    // 2) cancel any polling interval for this id
+    const timer = pollTimersRef.current.get(id);
+    if (timer) {
+      clearInterval(timer);
+      pollTimersRef.current.delete(id);
     }
+
+    // 3) drop from local state immediately
+    setIncidents((prev) => prev.filter((inc) => inc.id !== id));
+    if (pendingManualId === id) setPendingManualId(null);
+
     setTimeout(() => {
       setIsDeletingSelected(false);
       setSelectedIncident(null);
