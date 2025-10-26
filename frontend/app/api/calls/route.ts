@@ -44,7 +44,7 @@ async function processLocationJob(id: string, buffer: Buffer, filename: string, 
       status: "needs_confirmation",
       createdAt: store.get(id)?.createdAt || new Date().toISOString(),
       emergencyType: payload?.Incident || payload?.type_of_emergency || "Unknown",
-      transcript: payload?.transcription || `Emergency at ${payload?.Address || payload?.address || 'unknown location'}`,
+      transcript: payload?.Transcription || `Emergency at ${payload?.Address || payload?.address || 'unknown location'}`,
       location,
       notes: payload?.location,
     });

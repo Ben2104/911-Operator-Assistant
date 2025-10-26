@@ -752,7 +752,7 @@ export default function DashboardPage() {
                   <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
                 </div>
                 <div>
-                  <span className="text-neutral-500">Postal code:</span> <span className="text-black">{extractPostalCode(selectedIncident.location?.address) || "—"}</span>
+                  <span className="text-neutral-500">Type:</span> <span className="text-black">{selectedIncident.emergencyType || "—"}</span>
                 </div>
                 <div>
                   <span className="text-neutral-500">Coordinates:</span>{" "}
