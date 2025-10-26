@@ -59,24 +59,24 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /** ---------- Stable ID & normalization helpers (content-only IDs) ---------- **/
-  const hasValidLocation = (inc?: Incident | null) =>
-    !!(inc?.location &&
-      Number.isFinite(inc.location.lat) &&
-      Number.isFinite(inc.location.lng));
 
-  // put this above normText/normCoord/makeStableId
-  const djb2 = (str: string) => {
-    let h = 5381;
-    for (let i = 0; i < str.length; i++) h = (h * 33) ^ str.charCodeAt(i);
-    return (h >>> 0).toString(36);
-  };
+// Quick check used by UI + confirm guard
+const hasValidLocation = (inc?: Incident | null) =>
+  !!(inc?.location && Number.isFinite(inc.location.lat) && Number.isFinite(inc.location.lng));
 
-  const normText = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+// put this above normText/normCoord/makeStableId
+const djb2 = (str: string) => {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (h * 33) ^ str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+};
 
-  const normCoord = (v: any) => {
-    const n = parseFloat(String(v ?? "").trim());
-    return Number.isFinite(n) ? n.toFixed(6) : "";
-  };
+const normText = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+const normCoord = (v: any) => {
+  const n = parseFloat(String(v ?? "").trim());
+  return Number.isFinite(n) ? n.toFixed(6) : "";
+};
 
 // Bring any server/client shape into a canonical raw-shape
 const unifyShape = (e: any) => {
@@ -108,26 +108,25 @@ const unifyShape = (e: any) => {
   };
 };
 
-  // unchanged
-  const makeRawFingerprint = (e: any) => {
-    const u = unifyShape(e);
-    const addr = normText(u.Address);
-    const lat = normCoord(u.lat);
-    const lng = normCoord(u.long);
-    const txt = normText(u.Transcription);
-    return `${addr}|${lat}|${lng}|${txt}`;
-  };
+// Content fingerprint (raw/un-normalized server object)
+const makeRawFingerprint = (e: any) => {
+  const u = unifyShape(e);
+  const addr = normText(u.Address);
+  const lat = normCoord(u.lat);
+  const lng = normCoord(u.long);
+  const txt = normText(u.Transcription);
+  return `${addr}|${lat}|${lng}|${txt}`;
+};
 
-  // ✅ updated: salt with createdAt if available
-  const makeStableId = (e: any) => {
-    const u = unifyShape(e);
-    const fp = makeRawFingerprint(u);
-    const created = normText(u.createdAt ?? u.timestamp ?? "");
-    return `srv-${djb2(`${fp}|${created}`)}`;
-  };
+// Stable id for raw objects, salted with createdAt to separate different calls
+const makeStableId = (e: any) => {
+  const u = unifyShape(e);
+  const fp = makeRawFingerprint(u);
+  const created = normText(u.createdAt ?? u.timestamp ?? "");
+  return `srv-${djb2(`${fp}|${created}`)}`;
+};
 
-
-// Fingerprint for Incident objects (used for belt-and-suspenders dedupe)
+// Fingerprint for Incident objects (used for belt-and-suspenders dedupe/dismiss)
 const fingerprintIncident = (inc: Incident) => {
   const addr = normText(inc.location?.address ?? "");
   const lat = inc.location ? inc.location.lat.toFixed(6) : "";
@@ -147,9 +146,7 @@ const dedupeByFingerprint = (arr: Incident[]) => {
       byFp.set(fp, prev ? { ...prev, ...inc } : inc);
     }
   }
-  return Array.from(byFp.values()).sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  return Array.from(byFp.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 /** ------------------------------------------------------------------------ **/
 
@@ -188,7 +185,8 @@ export default function DashboardPage() {
   const [dispatchNotices, setDispatchNotices] = useState<Record<string, { message?: string; error?: string }>>({});
 
   // Dismissal persistence (localStorage)
-  const dismissedIdsRef = useRef<Set<string>>(new Set());
+  const dismissedIdsRef = useRef<Set<string>>(new Set());           // id-based dismissals
+  const dismissedFpsRef = useRef<Set<string>>(new Set());           // content fingerprint dismissals
   const pollTimersRef = useRef<Map<string, number>>(new Map());
   const [, force] = useState(0);
   const dismissedKey = "911:dismissedIds";
@@ -196,16 +194,19 @@ export default function DashboardPage() {
 
   const persistDismissed = useCallback(() => {
     try {
-      localStorage.setItem(dismissedKey, JSON.stringify(Array.from(dismissedIdsRef.current)));
+      localStorage.setItem(
+        dismissedKey,
+        JSON.stringify({
+          ids: Array.from(dismissedIdsRef.current),
+          fps: Array.from(dismissedFpsRef.current),
+        })
+      );
     } catch {}
   }, []);
 
-
   // --- Helpers for marker styling ---
-  // Normalize type strings like "Non-emergency:" → "non-emergency"
   const getTypeKey = (t?: string) => (t || "non-emergency").replace(/:\s*$/, "").trim().toLowerCase();
 
-  // Human-friendly label without trailing colon; map known manual values
   const formatTypeLabel = (t?: string) => {
     if (!t) return "Unknown";
     const normalized = t.trim().toLowerCase();
@@ -220,7 +221,6 @@ export default function DashboardPage() {
     return tags.map((tag) => formatTypeLabel(tag)).join(" | ");
   };
 
-  // Map type → colors + icon path + fallback glyph
   const pinConfigFor = (typeKey: string) => {
     switch (typeKey) {
       case "crime":
@@ -236,10 +236,9 @@ export default function DashboardPage() {
     }
   };
 
-  // Build a PinElement element; fallback to emoji glyph if the image fails
   const makePin = (iconUrl: string, bg: string, border: string, fallbackGlyph: string): Promise<HTMLElement> => {
     const img = document.createElement("img");
-    img.src = iconUrl; // expects icons in /public/icons/...
+    img.src = iconUrl;
     img.width = 20;
     img.height = 30;
     img.alt = "";
@@ -281,7 +280,6 @@ export default function DashboardPage() {
   };
 
   const normalizeLocation = (e: any) => {
-    // try nested location first
     if (e.location && typeof e.location === "object") {
       const lat = toNumber(e.location.lat ?? e.location.Lat ?? e.location.latitude ?? e.location.Latitude);
       const lng = toNumber(
@@ -296,8 +294,6 @@ export default function DashboardPage() {
         return { lat, lng, address: e.location.address ?? e.Address ?? e.address };
       }
     }
-
-    // fall back to flat keys
     const lat = toNumber(e.lat ?? e.Lat ?? e.latitude ?? e.Latitude);
     const lng = toNumber(e.lng ?? e.long ?? e.Lng ?? e.Long ?? e.longitude ?? e.Longitude);
     if (lat != null && lng != null) {
@@ -307,12 +303,18 @@ export default function DashboardPage() {
   };
   // --- end helpers ---
 
+  /** Storage hydrate (supports old array format and new {ids,fps} format) */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(dismissedKey);
       if (raw) {
-        const arr: string[] = JSON.parse(raw);
-        dismissedIdsRef.current = new Set(arr);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          dismissedIdsRef.current = new Set(parsed);
+        } else if (parsed && typeof parsed === "object") {
+          dismissedIdsRef.current = new Set(parsed.ids ?? []);
+          dismissedFpsRef.current = new Set(parsed.fps ?? []);
+        }
       }
     } catch {}
     setDismissedHydrated(true);
@@ -322,8 +324,13 @@ export default function DashboardPage() {
     const onStorage = (e: StorageEvent) => {
       if (e.key === dismissedKey && e.newValue) {
         try {
-          const arr: string[] = JSON.parse(e.newValue);
-          dismissedIdsRef.current = new Set(arr);
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            dismissedIdsRef.current = new Set(parsed);
+          } else {
+            dismissedIdsRef.current = new Set(parsed.ids ?? []);
+            dismissedFpsRef.current = new Set(parsed.fps ?? []);
+          }
           force((v) => v + 1);
           fetchTranscripts();
         } catch {}
@@ -365,14 +372,19 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // merge helper: overlay by id, then dedupe-by-fingerprint, and sort newest→oldest
+  // merge helper: overlay by id, then filter by id/fingerprint, then dedupe & sort newest→oldest
   const mergeFromServer = (prev: Incident[], incoming: Incident[]) => {
     const out = new Map(prev.map((p) => [p.id, p]));
     for (const inc of incoming) {
       const prevInc = out.get(inc.id);
       out.set(inc.id, prevInc ? { ...prevInc, ...inc } : inc);
     }
-    const filtered = Array.from(out.values()).filter((i) => !dismissedIdsRef.current.has(i.id));
+    const filtered = Array.from(out.values()).filter((i) => {
+      if (dismissedIdsRef.current.has(i.id)) return false;
+      const fp = fingerprintIncident(i);
+      if (dismissedFpsRef.current.has(fp)) return false;
+      return true;
+    });
     return dedupeByFingerprint(filtered);
   };
 
@@ -385,30 +397,34 @@ export default function DashboardPage() {
       const raw = pickArray(payload);
       if (!Array.isArray(raw) || raw.length === 0) return;
 
-      const mapped: Incident[] = raw.map((e: any) => {
-        const u = unifyShape(e);
-        const type = (u.Incident || "").toString().trim().toLowerCase() || undefined;
+      const mapped: Incident[] = raw
+        .map((e: any) => {
+          const u = unifyShape(e);
+          // extra safety: skip content that was dismissed by fingerprint
+          if (dismissedFpsRef.current.has(makeRawFingerprint(u))) return null;
+          const type = (u.Incident || "").toString().trim().toLowerCase() || undefined;
 
-        return {
-          id: makeStableId(u),
-          createdAt: u.createdAt || new Date().toISOString(),
-          transcript: u.Transcription || undefined,
-          notes: undefined,
-          emergencyType: type,
-          emergencyTags: u.tags ?? (type ? [type] : undefined),
-          confidence: typeof u.confidence === "number" ? u.confidence : undefined,
-          location: (() => {
-            const lat = parseFloat(String(u.lat ?? ""));
-            const lng = parseFloat(String(u.long ?? ""));
-            if (Number.isFinite(lat) && Number.isFinite(lng)) {
-              return { lat, lng, address: u.Address || undefined };
-            }
-            return null;
-          })(),
-          callerPhone: u.callerPhone,
-          status: u.status || "needs_confirmation",
-        };
-      });
+          return {
+            id: makeStableId(u),
+            createdAt: u.createdAt || new Date().toISOString(),
+            transcript: u.Transcription || undefined,
+            notes: undefined,
+            emergencyType: type,
+            emergencyTags: u.tags ?? (type ? [type] : undefined),
+            confidence: typeof u.confidence === "number" ? u.confidence : undefined,
+            location: (() => {
+              const lat = parseFloat(String(u.lat ?? ""));
+              const lng = parseFloat(String(u.long ?? ""));
+              if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                return { lat, lng, address: u.Address || undefined };
+              }
+              return null;
+            })(),
+            callerPhone: u.callerPhone,
+            status: u.status || "needs_confirmation",
+          } as Incident;
+        })
+        .filter(Boolean) as Incident[];
 
       setIncidents((prev) => mergeFromServer(prev, mapped));
     } catch (e) {
@@ -438,15 +454,13 @@ export default function DashboardPage() {
     let cancelled = false;
 
     const render = async () => {
-      // If a specific center was requested, apply it once and clear it
       if (pendingCenter) {
         map.panTo(pendingCenter);
         map.setZoom(13);
-        setPendingCenter(null); // ✅ clear so it doesn't keep re-centering
-        autoPannedRef.current = true; // we've already autopanned once
+        setPendingCenter(null);
+        autoPannedRef.current = true;
       }
 
-      // clear previous markers
       (map as any).__markers?.forEach((mk: google.maps.marker.AdvancedMarkerElement) => (mk.map = null));
       (map as any).__markers = [];
 
@@ -462,7 +476,6 @@ export default function DashboardPage() {
         const typeKey = getTypeKey(inc.emergencyType);
         const cfg = pinConfigFor(typeKey);
 
-        // Build pin content (with fallback)
         const contentEl = await makePin(cfg.icon, cfg.bg, cfg.border, cfg.fb);
 
         const marker = new (google.maps as any).marker.AdvancedMarkerElement({
@@ -475,7 +488,7 @@ export default function DashboardPage() {
         });
 
         marker.addListener("click", () => {
-          userMovedRef.current = true; // a click implies intent—don't auto-jump elsewhere
+          userMovedRef.current = true;
           focusIncidentLocation(inc);
           setSelectedIncident(inc);
         });
@@ -483,12 +496,11 @@ export default function DashboardPage() {
         (map as any).__markers.push(marker);
       }
 
-      // Gentle autopan ONCE to the newest marker, only if the user hasn't acted and nothing is selected
       if (!autoPannedRef.current && !userMovedRef.current && !selectedIncident) {
         const latestWithLoc = [...incidents].reverse().find((i) => i.location);
         if (latestWithLoc) {
           map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
-          autoPannedRef.current = true; // ✅ do this only once
+          autoPannedRef.current = true;
         }
       }
     };
@@ -659,7 +671,7 @@ export default function DashboardPage() {
             setUploadProgress(null);
             setSelectedUploadName(null);
             setUploadingId(id);
-            pollJob(id); // start polling this job (will be stored in pollTimersRef)
+            pollJob(id);
             setTimeout(() => setUploadingId((curr) => (curr === id ? null : curr)), 1200);
             resolve({ id });
           } catch (err) {
@@ -696,6 +708,7 @@ export default function DashboardPage() {
     await uploadBlob(blob);
     setAudioChunks([]);
   };
+
   // Unwrap common server shapes (array, {data}, {result}, {incident}, {event}, etc.)
   const unwrapIncident = (raw: any) => {
     if (Array.isArray(raw)) return raw[0] ?? {};
@@ -730,13 +743,28 @@ export default function DashboardPage() {
         if (!res.ok) return;
 
         const raw = await res.json();
-        const obj = unwrapIncident(raw);          // 👈 unwrap
+        const obj = unwrapIncident(raw);
         const u = unifyShape(obj);
 
-        // If the server hasn’t filled anything in yet, keep the placeholder visible
-        if (!hasUsefulFields(u)) return;          // 👈 do nothing until we have content
+        // skip placeholders
+        if (!hasUsefulFields(u)) return;
+
+        // Hard stop if this content was dismissed by fingerprint
+        const rawFp = makeRawFingerprint(u);
+        if (dismissedFpsRef.current.has(rawFp)) {
+          window.clearInterval(timer);
+          pollTimersRef.current.delete(jobId);
+          return;
+        }
 
         const stableId = makeStableId(u);
+
+        // If user deleted/dismissed this id, stop polling and do not re-add it.
+        if (dismissedIdsRef.current.has(stableId)) {
+          window.clearInterval(timer);
+          pollTimersRef.current.delete(jobId);
+          return;
+        }
 
         const normalized: Incident = {
           id: stableId,
@@ -758,18 +786,9 @@ export default function DashboardPage() {
           status: u.status || "needs_confirmation",
         };
 
-        // If user deleted/dismissed this id, stop polling and do not re-add it.
-        if (dismissedIdsRef.current.has(stableId)) {
-          window.clearInterval(timer);
-          pollTimersRef.current.delete(jobId);
-          return;
-        }
-
         setIncidents((prev) => {
           // drop the placeholder row (jobId) and any transient server id
-          let next = prev.filter(
-            (p) => p.id !== jobId && p.id !== (obj.id as string) && p.id !== stableId
-          );
+          let next = prev.filter((p) => p.id !== jobId && p.id !== (obj.id as string) && p.id !== stableId);
 
           // merge/insert normalized
           const idx = next.findIndex((p) => p.id === stableId);
@@ -801,13 +820,12 @@ export default function DashboardPage() {
     pollTimersRef.current.set(jobId, timer);
   };
 
-
   const confirmIncident = async (incident: Incident): Promise<Incident | null> => {
     if (!hasValidLocation(incident)) {
-        // Optional: surface a message in the inspector if it's open
-        setSelectedActionError("This incident has no location yet. Add an address or coordinates before confirming.");
-        return null;
+      setSelectedActionError("This incident has no location yet. Add an address or coordinates before confirming.");
+      return null;
     }
+
     const payload: {
       id?: string;
       address?: string;
@@ -838,7 +856,6 @@ export default function DashboardPage() {
       });
       if (!res.ok) throw new Error("Confirmation failed");
 
-      // server may return a different shape — normalize it to our stable id
       const serverData = await res.json();
       const u = unifyShape(serverData);
       const stableId = makeStableId(u);
@@ -864,18 +881,13 @@ export default function DashboardPage() {
       };
 
       setIncidents((prev) => {
-        // if the server's stable id is different, remove the old placeholder row
         let next = prev.filter((p) => p.id !== incident.id || incident.id === stableId);
-
-        // merge/insert the normalized confirmed incident
         const idx = next.findIndex((p) => p.id === stableId);
         if (idx >= 0) next[idx] = { ...next[idx], ...normalized };
         else next = [normalized, ...next];
-
         return dedupeByFingerprint(next);
       });
 
-      // keep the inspector in sync
       setSelectedIncident((current) => {
         if (!current) return current;
         if (current.id === incident.id && incident.id !== stableId) return { ...normalized };
@@ -883,10 +895,7 @@ export default function DashboardPage() {
         return current;
       });
 
-      // clear any pending manual link
       if (pendingManualId === incident.id) setPendingManualId(null);
-
-      // clear the uploading pill if it’s still around
       setUploadingId((curr) => (curr === incident.id || curr === stableId ? null : curr));
 
       return normalized;
@@ -933,9 +942,11 @@ export default function DashboardPage() {
     setSelectedActionError(null);
 
     const id = selectedIncident.id;
+    const fp = fingerprintIncident(selectedIncident);
 
-    // mark dismissed and persist (used by all pollers and merges)
+    // mark dismissed (id + fingerprint) and persist
     dismissedIdsRef.current.add(id);
+    dismissedFpsRef.current.add(fp);
     persistDismissed();
     force((v) => v + 1);
 
@@ -946,8 +957,8 @@ export default function DashboardPage() {
       pollTimersRef.current.delete(id);
     }
 
-    // remove from local state
-    setIncidents((prev) => prev.filter((inc) => inc.id !== id));
+    // remove from local state: by id OR content fingerprint
+    setIncidents((prev) => prev.filter((inc) => inc.id !== id && fingerprintIncident(inc) !== fp));
     if (pendingManualId === id) setPendingManualId(null);
 
     setTimeout(() => {
@@ -1117,17 +1128,16 @@ export default function DashboardPage() {
                   >
                     <MapPin className="w-4 h-4" /> View on map
                   </Button>
-                    {cpuMode && inc.status === "needs_confirmation" && (
-                      <Button
-                        className={`flex-1 justify-center ${hasValidLocation(inc) ? "bg-black text-white" : ""}`}
-                        onClick={() => hasValidLocation(inc) ? confirmIncident(inc) : null}
-                        disabled={!hasValidLocation(inc)}
-                        title={hasValidLocation(inc) ? undefined : "Add a location before confirming."}
-                      >
-                        Confirm & Mark
-                      </Button>
-                    )}
-
+                  {cpuMode && inc.status === "needs_confirmation" && (
+                    <Button
+                      className={`flex-1 justify-center ${hasValidLocation(inc) ? "bg-black text-white" : ""}`}
+                      onClick={() => (hasValidLocation(inc) ? confirmIncident(inc) : null)}
+                      disabled={!hasValidLocation(inc)}
+                      title={hasValidLocation(inc) ? undefined : "Add a location before confirming."}
+                    >
+                      Confirm & Mark
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -1259,7 +1269,8 @@ export default function DashboardPage() {
               </div>
               <div className="mt-3 space-y-2 text-sm">
                 <div>
-                  <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
+                  <span className="text-neutral-500">Address:</span>{" "}
+                  <span className="text-black">{selectedIncident.location?.address || "—"}</span>
                 </div>
                 <div>
                   <span className="text-neutral-500">Type:</span>{" "}
