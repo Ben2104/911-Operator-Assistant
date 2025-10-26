@@ -1,8 +1,8 @@
-from utils import extract_event, parse_event
+from utils import transcribe, parse_event
 import json
 
-event = extract_event(
-    r"C:\Users\syngu\Downloads\CSULB\MarinaHack\Marina-Hacks\back_end\audio\audio.wav"
+event = transcribe(
+    r"C:\Hackathons\Marina-Hacks2\back_end\audio\7-11_bolsa_emergency.mp3"
 )
 
 event_parsed = parse_event(event)

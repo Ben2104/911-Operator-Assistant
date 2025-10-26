@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from utils import extract_event, parse_event
+from utils import transcribe, parse_event
 from pathlib import Path
 import time, io
 
@@ -16,13 +16,15 @@ async def get_event(file: UploadFile = File(...)):
     data = await file.read()
     audio_bytes = io.BytesIO(data)
 
-    event = extract_event(audio_bytes)
-    parsed_event = parse_event(event)
+    trasribtion = transcribe(audio_bytes)
+    parsed_event = parse_event(trascribtion)
     end = int(time.time())
 
     if parsed_event:
         parsed_event['Response_time']= end-start
     else:
-        raise HTTPException(404, detail="ERROR: Location not found.")
+        pass
+    
+    parsed_event['Transcribtion'] = transcribtion
     
     return parsed_event
