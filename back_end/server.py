@@ -51,12 +51,12 @@ def update_transcript(recording_url: str):
         "file":("recording.mp3",r.content,'audio/mpeg')
     }
     
-    event.append(requests.post("http://127.0.0.1:8000/location",files=files).json())
+    events.append(requests.post("http://127.0.0.1:8000/location",files=files).json())
     
 @app.get('/get-transcript')
 async def get_transcript():
-    global event
-    temp = event
+    global events
+    temp = events
     event = []
     return temp 
 
