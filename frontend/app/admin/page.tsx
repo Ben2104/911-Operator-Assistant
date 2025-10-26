@@ -92,8 +92,9 @@ export default function DashboardPage() {
       case "fire":
         return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/fire.svg", fb: "🔥" };
       case "non-emergency":
+        return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/fire.svg", fb: "ⓘ" };
       default:
-        return { bg: "#e5e7eb", border: "#6b7280", icon: "/icons/info.svg", fb: "ⓘ" };
+        return { bg: "#ff0000ff", border: "#6b7280", icon: "/icons/emergency.svg", fb: "🚨" };
     }
   };
 
@@ -101,8 +102,8 @@ export default function DashboardPage() {
   const makePin = (iconUrl: string, bg: string, border: string, fallbackGlyph: string): Promise<HTMLElement> => {
     const img = document.createElement("img");
     img.src = iconUrl; // expects icons in /public/icons/...
-    img.width = 18;
-    img.height = 18;
+    img.width = 20;
+    img.height = 30;
     img.alt = "";
     img.style.display = "block";
     img.style.pointerEvents = "none";
