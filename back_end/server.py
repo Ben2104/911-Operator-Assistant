@@ -3,7 +3,7 @@ from twilio.twiml.voice_response import VoiceResponse
 from utils import transcribe, parse_event
 import time, io, requests,os
 
-event = {}
+events = []
 
 app = FastAPI()
 
@@ -51,12 +51,14 @@ def update_transcript(recording_url: str):
         "file":("recording.mp3",r.content,'audio/mpeg')
     }
     
-    event = requests.post("http://127.0.0.1:8000/location",files=files).json()
+    event.append(requests.post("http://127.0.0.1:8000/location",files=files).json())
     
 @app.get('/get-transcript')
 async def get_transcript():
     global event
-    return event
+    temp = event
+    event = []
+    return temp 
 
 @app.post("/location")
 async def get_event(file: UploadFile = File(...)):
