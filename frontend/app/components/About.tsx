@@ -32,26 +32,26 @@ export default function About() {
 
           <ul className="space-y-3 text-sm text-black">
             <li className="flex items-start gap-2">
-              <AlertTriangle className="text-red-400 w-5 h-5 mt-0.5" />
+              <AlertTriangle className="text-red-600 w-5 h-5 mt-0.5" />
               Operators deal with chaotic, unclear, or incomplete information.
             </li>
             <li className="flex items-start gap-2">
-              <AlertTriangle className="text-red-400 w-5 h-5 mt-0.5" />
+              <AlertTriangle className="text-red-600 w-5 h-5 mt-0.5" />
               They must listen, type, and decide simultaneously — under pressure.
             </li>
             <li className="flex items-start gap-2">
-              <AlertTriangle className="text-red-400 w-5 h-5 mt-0.5" />
+              <AlertTriangle className="text-red-600 w-5 h-5 mt-0.5" />
               Current systems rely heavily on manual address lookup or caller cooperation.
             </li>
             <li className="flex items-start gap-2">
-              <AlertTriangle className="text-red-400 w-5 h-5 mt-0.5" />
+              <AlertTriangle className="text-red-600 w-5 h-5 mt-0.5" />
               Delayed dispatch can slow emergency response and increase risk.
             </li>
           </ul>
 
           <div className="mt-6 text-sm text-black border-l-2 border-red-500 pl-4">
             ⏱️ Average delay in locating a caller:{" "}
-            <span className="text-red-600 font-medium">20–90 seconds per call</span>
+            <span className="text-red-600 font-medium">8–10 seconds per call</span>
           </div>
         </motion.div>
 
@@ -83,7 +83,7 @@ export default function About() {
           {/* Feature Cards */}
           <div className="grid sm:grid-cols-2 gap-4 mt-6">
             <FeatureCard
-              icon={<Mic className="w-5 h-5 text-emerald-400" />}
+              icon={<Mic className="w-5 h-5 text-emerald-600" />}
               title="Speech-to-Text AI"
               desc="Transcribes emergency calls instantly."
             />
