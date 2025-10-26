@@ -2,62 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
-import { Mic, Square, Upload, MapPin, Play, Pause, FileAudio2, Loader2, CheckCircle2, TriangleAlert, Search, ChevronRight, Trash2 } from "lucide-react";
-import LocationPrompt from "../components/LocationPrompt";
-import Recording from "../components/Recording";
-
-/**
- * 911 Operator Dashboard — Single-file Next.js page
- * -------------------------------------------------
- * Put this file at: app/dashboard/page.tsx
- *
- * What it does:
- * - Left panel: record audio OR upload call recordings (mp3/wav/m4a)
- * - Sends audio to server: POST /api/calls (multipart/form-data)
- * - Polls job status: GET /api/calls/:id -> { status, transcript, emergencyType, confidence, location, callerPhone, flags }
- * - Right panel: Google Map shows markers returned by the server (auto or on operator confirmation)
- * - Operator can click a marker to open an action panel and send canned messages (stub: POST /api/dispatch)
- * - CPU-only mode: operator must click "Confirm & Mark" when enough info is present
- *
- * Expected minimal backend endpoints (you can stub for hackathon):
- *   POST /api/calls
- *     - formData: { file: Blob, filename?: string }
- *     - returns: { id: string }
- *
- *   GET /api/calls/[id]
- *     - returns while processing: { id, status: "processing" | "needs_confirmation" | "done", progress?: number }
- *     - returns when parsed:
- *         {
- *           id,
- *           status: "needs_confirmation" | "done",
- *           transcript: string,
- *           emergencyType: "Robbery" | "Fire" | "Medical" | "Accident" | "Unknown",
- *           confidence: number, // 0..1 for classification
- *           location: { lat: number, lng: number, address?: string } | null,
- *           callerPhone?: string,
- *           flags?: { brokenAccent?: boolean; intoxicated?: boolean; suspectedSwatting?: boolean }
- *         }
- *
- *   POST /api/confirm
- *     - body: { id }
- *     - server responds with confirmed parsed payload and persists marker
- *
- *   GET /api/incidents
- *     - returns: Array<Incident>
- *
- *   POST /api/dispatch
- *     - body: { incidentId, channel: "SMS" | "RADIO" | "INTERNAL", message: string }
- *     - returns: { ok: true }
- *
- * Google Maps:
- *   - Requires NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in env.
- *
- * Notes:
- *   - This page is fully client-side. For production, gate with auth and CSRF.
- *   - MediaRecorder is supported in Chromium/Firefox/Safari (desktop). iOS may require user gesture.
- */
-
-// --- Types ---
+import { Mic, Square, Upload, MapPin, Loader2, CheckCircle2, TriangleAlert, Search, ChevronRight, Trash2 } from "lucide-react";
 
 type Incident = {
   id: string;
@@ -70,8 +15,6 @@ type Incident = {
   flags?: { brokenAccent?: boolean; intoxicated?: boolean; suspectedSwatting?: boolean };
   status: "processing" | "needs_confirmation" | "done";
 };
-
-// --- UI helpers (shadcn-like primitives kept inline to avoid external deps during hackathon) ---
 
 function Button({ className = "", children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
@@ -92,8 +35,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="text-sm font-semibold tracking-wide text-neutral-500 uppercase">{children}</div>;
 }
 
-// --- Page Component ---
-
 export default function DashboardPage() {
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -106,12 +47,9 @@ export default function DashboardPage() {
   const [selectedUploadName, setSelectedUploadName] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [cpuMode, setCpuMode] = useState(true); // true = operator must confirm before placing marker
+  const [cpuMode, setCpuMode] = useState(true);
   const [loadingMap, setLoadingMap] = useState(true);
   const [pendingCenter, setPendingCenter] = useState<google.maps.LatLngLiteral | null>(null);
-  const [locationPromptDismissed, setLocationPromptDismissed] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
   const [manualLatitude, setManualLatitude] = useState("");
   const [manualLongitude, setManualLongitude] = useState("");
   const [manualAddress, setManualAddress] = useState("");
@@ -124,34 +62,19 @@ export default function DashboardPage() {
   const [isConfirmingSelected, setIsConfirmingSelected] = useState(false);
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
 
-  // Track which incidents the operator dismissed (so they don't come back)
+  // Dismissal persistence (localStorage)
   const dismissedIdsRef = useRef<Set<string>>(new Set());
-
-  // Track polling intervals per incident id so we can cancel them
   const pollTimersRef = useRef<Map<string, number>>(new Map());
-
-  // Tiny state bump to force a re-render when we mutate dismissed set
   const [, force] = useState(0);
-
-  // ===== PERSISTENCE ADDITIONS (localStorage) =====
-  // Key used to persist dismissed incident IDs
   const dismissedKey = "911:dismissedIds";
-  // We delay fetching incidents until we've hydrated the dismissed set from storage
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
 
-  // Persist helper
   const persistDismissed = useCallback(() => {
     try {
-      localStorage.setItem(
-        dismissedKey,
-        JSON.stringify(Array.from(dismissedIdsRef.current))
-      );
-    } catch {
-      // ignore storage failures
-    }
+      localStorage.setItem(dismissedKey, JSON.stringify(Array.from(dismissedIdsRef.current)));
+    } catch {}
   }, []);
 
-  // Hydrate dismissed IDs on first mount
   useEffect(() => {
     try {
       const raw = localStorage.getItem(dismissedKey);
@@ -159,13 +82,10 @@ export default function DashboardPage() {
         const arr: string[] = JSON.parse(raw);
         dismissedIdsRef.current = new Set(arr);
       }
-    } catch {
-      // ignore parse errors
-    }
+    } catch {}
     setDismissedHydrated(true);
   }, []);
 
-  // Keep multiple tabs/windows in sync
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === dismissedKey && e.newValue) {
@@ -173,19 +93,15 @@ export default function DashboardPage() {
           const arr: string[] = JSON.parse(e.newValue);
           dismissedIdsRef.current = new Set(arr);
           force((v) => v + 1);
-          // refresh incidents to reflect latest dismissals
           fetchIncidents();
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // ===== END PERSISTENCE ADDITIONS =====
-  
+
   // Load Google Maps
   useEffect(() => {
     let cancelled = false;
@@ -227,23 +143,17 @@ export default function DashboardPage() {
       if (!res.ok) return;
       const data: Incident[] = await res.json();
       setIncidents((prev) => {
-        // Keep local manual entries that aren't in server data
         const manual = prev.filter(
           (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
         );
-
         const merged = [...manual, ...data];
-
-        // Drop anything the operator dismissed (now persisted)
         return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
       });
-
     } catch (e) {
       console.error(e);
     }
   }, []);
 
-  // Poll for incidents — gated until dismissed IDs are hydrated
   useEffect(() => {
     if (!dismissedHydrated) return;
     fetchIncidents();
@@ -268,8 +178,7 @@ export default function DashboardPage() {
       setPendingCenter(null);
     }
 
-    // Clear existing markers by attaching to map instance
-    (map as any).__markers?.forEach((mk: google.maps.marker.AdvancedMarkerElement) => mk.map = null);
+    (map as any).__markers?.forEach((mk: google.maps.marker.AdvancedMarkerElement) => (mk.map = null));
     (map as any).__markers = [];
 
     incidents.forEach((inc) => {
@@ -277,7 +186,7 @@ export default function DashboardPage() {
       const marker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position: inc.location,
-        title: `${inc.emergencyType || "Incident"} (${(inc.confidence ?? 0) * 100 | 0}%)`,
+        title: `${inc.emergencyType || "Incident"} ${((inc.confidence ?? 0) * 100) | 0}%`,
       });
       marker.addListener("click", () => {
         focusIncidentLocation(inc);
@@ -286,38 +195,11 @@ export default function DashboardPage() {
       (map as any).__markers.push(marker);
     });
 
-    const latestWithLoc = [...incidents].reverse().find(i => i.location);
+    const latestWithLoc = [...incidents].reverse().find((i) => i.location);
     if (latestWithLoc) {
       map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
     }
   }, [incidents, map]);
-
-  const useCurrentLocation = () => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setLocationError("Geolocation unsupported in this browser.");
-      return;
-    }
-    setLocating(true);
-    setLocationError(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        if (map) {
-          map.panTo(coords);
-          map.setZoom(13);
-        } else {
-          setPendingCenter(coords);
-        }
-        setLocating(false);
-        setLocationPromptDismissed(true);
-      },
-      (err) => {
-        setLocating(false);
-        setLocationError(err.message || "Failed to fetch location.");
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
 
   const focusIncidentLocation = (incident: Incident) => {
     if (!incident.location) return;
@@ -402,7 +284,7 @@ export default function DashboardPage() {
     }
   };
 
-  // Media recorder handlers
+  // Recording
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -411,19 +293,17 @@ export default function DashboardPage() {
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
       };
-    // ⬇️ Auto-upload as soon as recording stops
       mediaRecorder.onstop = async () => {
         try {
           const blob = new Blob(chunks, { type: "audio/webm" });
-          // optional: name matches file-upload flow
           await uploadBlob(blob, `call-${Date.now()}.webm`);
         } catch (err) {
           console.error("Auto-upload failed:", err);
           setUploadError("Auto-upload failed. Try again.");
         } finally {
-          setAudioChunks([]); // not needed anymore, but keep tidy
+          setAudioChunks([]);
         }
-    };
+      };
 
       mediaRecorder.start();
       setRecorder(mediaRecorder);
@@ -441,7 +321,6 @@ export default function DashboardPage() {
     setIsRecording(false);
   };
 
-  // Upload with progress reporting (uses XHR to provide upload progress)
   const uploadBlob = (blob: Blob, filename = `call-${Date.now()}.webm`) => {
     return new Promise<{ id: string }>((resolve, reject) => {
       setUploadError(null);
@@ -467,12 +346,8 @@ export default function DashboardPage() {
             const data = JSON.parse(xhr.responseText);
             const id = data.id as string;
 
-            // If no backend, don't keep the spinner alive:
-            // setUploadingId(id); pollJob(id);  <-- remove these lines
             setUploadProgress(null);
             setSelectedUploadName(null);
-
-            // client-only: fake a brief "processing" then clear (optional)
             setUploadingId(id);
             setTimeout(() => setUploadingId((curr) => (curr === id ? null : curr)), 1200);
           } catch (err) {
@@ -484,7 +359,6 @@ export default function DashboardPage() {
           setUploadProgress(null);
         }
       };
-
 
       xhr.onerror = () => {
         setUploadError("Network error during upload");
@@ -509,10 +383,9 @@ export default function DashboardPage() {
     setAudioChunks([]);
   };
 
-  // Poll server for processing result
   const pollJob = async (id: string) => {
     let attempts = 0;
-    const maxAttempts = 120; // 10 min @ 5s
+    const maxAttempts = 120;
     const interval = 5000;
 
     const timer = setInterval(async () => {
@@ -521,7 +394,6 @@ export default function DashboardPage() {
       try {
         const res = await fetch(`/api/calls/${id}`);
         if (!res.ok) {
-          // optional: clear on repeated failures; we’ll clear on timeout below anyway
           return;
         }
         const data: Incident = await res.json();
@@ -534,12 +406,10 @@ export default function DashboardPage() {
           return next;
         });
 
-        // ⬅️ Clear spinner for both terminal states
         if (data.status === "needs_confirmation" || data.status === "done") {
           setUploadingId((curr) => (curr === id ? null : curr));
         }
 
-        // Stop polling once it's done (or keep if you need follow-up updates)
         if (data.status === "done") {
           clearInterval(timer);
         }
@@ -549,12 +419,10 @@ export default function DashboardPage() {
 
       if (attempts >= maxAttempts) {
         clearInterval(timer);
-        // ⬅️ Also clear spinner on timeout so it doesn’t spin forever
         setUploadingId((curr) => (curr === id ? null : curr));
       }
     }, interval);
   };
-
 
   const confirmIncident = async (id: string): Promise<Incident | null> => {
     try {
@@ -568,8 +436,6 @@ export default function DashboardPage() {
 
       setIncidents((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
       setSelectedIncident((current) => (current && current.id === id ? { ...current, ...data } : current));
-
-      // ⬅️ spinner off once we reach a confirmed state
       setUploadingId((curr) => (curr === id ? null : curr));
 
       if (pendingManualId === id) setPendingManualId(null);
@@ -594,7 +460,7 @@ export default function DashboardPage() {
     if (result) {
       setPendingManualId(null);
     } else {
-    setConfirmManualError("Unable to confirm marker. Try again.");
+      setConfirmManualError("Unable to confirm marker. Try again.");
     }
     setConfirmingManual(false);
   };
@@ -617,20 +483,16 @@ export default function DashboardPage() {
 
     const id = selectedIncident.id;
 
-    // 1) remember dismissal (persist locally so it survives refresh)
     dismissedIdsRef.current.add(id);
-    persistDismissed(); // <-- NEW: write to localStorage
-    // force a re-render (since Set mutation isn’t reactive)
+    persistDismissed();
     force((v) => v + 1);
 
-    // 2) cancel any polling interval for this id
     const timer = pollTimersRef.current.get(id);
     if (timer) {
       clearInterval(timer);
       pollTimersRef.current.delete(id);
     }
 
-    // 3) drop from local state immediately
     setIncidents((prev) => prev.filter((inc) => inc.id !== id));
     if (pendingManualId === id) setPendingManualId(null);
 
@@ -651,24 +513,13 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <LocationPrompt
-          useCurrentLocation={useCurrentLocation}
-          locating={locating}
-          locationError={locationError}
-        />
-
         {/* Upload */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card className="p-4">
             <SectionTitle>Upload Recording</SectionTitle>
             <div className="mt-3 flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="file"
-                  accept="audio/*"
-                  className="hidden"
-                  onChange={handleUploadInput}
-                />
+                <input type="file" accept="audio/*" className="hidden" onChange={handleUploadInput} />
                 <span className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 shadow-sm border border-neutral-200 hover:shadow transition active:translate-y-[1px] bg-black text-white hover:opacity-90">
                   <Upload className="w-4 h-4" /> Choose file
                 </span>
@@ -704,13 +555,10 @@ export default function DashboardPage() {
         <div>
           <SectionTitle>Recent Calls</SectionTitle>
           <div className="flex-1 min-h-0 flex flex-col">
-          <div className="mt-3 flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-2"></div>
-            {incidents.length === 0 && (
-              <div className="text-sm text-neutral-500">No calls yet.</div>
-            )}
+            <div className="mt-3 flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-2"></div>
+            {incidents.length === 0 && <div className="text-sm text-neutral-500">No calls yet.</div>}
             {incidents.map((inc) => (
               <Card key={inc.id} className="p-3 relative">
-                {/* Status badge in top-right corner */}
                 <div className="absolute top-3 right-3">
                   {inc.status === "processing" && (
                     <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full text-xs">
@@ -729,19 +577,16 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Card content */}
                 <div className="pr-32">
                   <div className="flex items-center gap-2 text-sm mb-2">
                     <span className="font-semibold text-black">#{inc.id}</span>
                     <span className="text-neutral-500">{new Date(inc.createdAt || Date.now()).toLocaleString()}</span>
                   </div>
-                  
+
                   <div className="text-sm space-y-1">
                     <div>
                       <span className="text-neutral-500">Type:</span> <span className="text-black">{inc.emergencyType || "Unknown"}</span>
-                      {typeof inc.confidence === "number" && (
-                        <span className="ml-2 text-black">({Math.round((inc.confidence || 0) * 100)}%)</span>
-                      )}
+                      {typeof inc.confidence === "number" && <span className="ml-2 text-black">({Math.round((inc.confidence || 0) * 100)}%)</span>}
                     </div>
                     <div className="truncate">
                       <span className="text-neutral-500">Transcript:</span> <span className="text-black">{inc.transcript || "—"}</span>
@@ -764,19 +609,12 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Action buttons at bottom */}
                 <div className="mt-3 flex gap-2">
-                  <Button 
-                    className="flex-1 justify-center text-black" 
-                    onClick={() => { focusIncidentLocation(inc); setSelectedIncident(inc); }}
-                  >
+                  <Button className="flex-1 justify-center text-black" onClick={() => { focusIncidentLocation(inc); setSelectedIncident(inc); }}>
                     <MapPin className="w-4 h-4" /> View on map
                   </Button>
                   {cpuMode && inc.status === "needs_confirmation" && (
-                    <Button 
-                      className="flex-1 justify-center bg-black text-white" 
-                      onClick={() => confirmIncident(inc.id)}
-                    >
+                    <Button className="flex-1 justify-center bg-black text-white" onClick={() => confirmIncident(inc.id)}>
                       Confirm & Mark
                     </Button>
                   )}
@@ -795,12 +633,12 @@ export default function DashboardPage() {
             <Loader2 className="w-6 h-6 animate-spin" />
           </div>
         )}
-        <div className="pointer-events-none absolute top-4 left-4 flex flex-col gap-3 w/full max-w-sm">
+        <div className="pointer-events-none absolute top-4 left-4 flex flex-col gap-3 w-full max-w-sm">
           <div className="rounded-3xl bg-white border border-neutral-200 shadow-xl p-4 pointer-events-auto">
             <div className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">Manual address</div>
             <form className="mt-3 flex flex-col gap-3 text-black" onSubmit={handleManualLocationSubmit}>
               <label className="text-xs font-medium text-black">Address or notes</label>
-                <div className="flex items-center gap-2 rounded-2xl border border-neutral-200 px-3 py-2">
+              <div className="flex items-center gap-2 rounded-2xl border border-neutral-200 px-3 py-2">
                 <Search className="w-4 h-4 text-black" />
                 <input
                   type="text"
@@ -809,7 +647,7 @@ export default function DashboardPage() {
                   onChange={(e) => setManualAddress(e.target.value)}
                   className="flex-1 text-sm focus:outline-none placeholder:text-neutral-400"
                 />
-                </div>
+              </div>
               {manualLocationError && <div className="text-xs text-red-600">{manualLocationError}</div>}
               <div className="flex gap-2">
                 <Button className="bg-black text-white hover:opacity-90 flex-1 justify-center" type="submit" disabled={isGeocoding}>
@@ -839,19 +677,12 @@ export default function DashboardPage() {
               <div className="mt-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm">
                 <div className="font-medium text-neutral-800">{pendingManualIncident.location?.address || "Manual coordinates"}</div>
                 <div className="text-xs text-neutral-500">
-                  {pendingManualIncident.location
-                    ? `${pendingManualIncident.location.lat.toFixed(4)}, ${pendingManualIncident.location.lng.toFixed(4)}`
-                    : "No coordinates"}
+                  {pendingManualIncident.location ? `${pendingManualIncident.location.lat.toFixed(4)}, ${pendingManualIncident.location.lng.toFixed(4)}` : "No coordinates"}
                 </div>
               </div>
               {confirmManualError && <div className="mt-2 text-xs text-red-600">{confirmManualError}</div>}
               <div className="mt-3 flex gap-2">
-                <Button
-                  className="bg-black text-white hover:opacity-90 flex-1 justify-center"
-                  type="button"
-                  onClick={handleConfirmPendingManual}
-                  disabled={confirmingManual}
-                >
+                <Button className="bg-black text-white hover:opacity-90 flex-1 justify-center" type="button" onClick={handleConfirmPendingManual} disabled={confirmingManual}>
                   {confirmingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm marker"}
                 </Button>
                 <Button
@@ -911,16 +742,15 @@ export default function DashboardPage() {
               </div>
               <div className="mt-3 space-y-2 text-sm">
                 <div>
-                    <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
+                  <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
                 </div>
                 <div>
                   <span className="text-neutral-500">Postal code:</span> <span className="text-black">{extractPostalCode(selectedIncident.location?.address) || "—"}</span>
                 </div>
                 <div>
-                  <span className="text-neutral-500">Coordinates:</span>{" "} <span className="text-black">
-                  {selectedIncident.location
-                    ? `${selectedIncident.location.lat.toFixed(5)}, ${selectedIncident.location.lng.toFixed(5)}`
-                    : "—"}
+                  <span className="text-neutral-500">Coordinates:</span>{" "}
+                  <span className="text-black">
+                    {selectedIncident.location ? `${selectedIncident.location.lat.toFixed(5)}, ${selectedIncident.location.lng.toFixed(5)}` : "—"}
                   </span>
                 </div>
                 <div>
@@ -934,21 +764,10 @@ export default function DashboardPage() {
               </div>
               {selectedActionError && <div className="mt-2 text-xs text-red-600">{selectedActionError}</div>}
               <div className="mt-4 flex flex-col gap-2">
-              
-                <Button
-                  className="justify-center bg-black text-white hover:opacity-90"
-                  type="button"
-                  onClick={handleKeepSelected}
-                  disabled={isConfirmingSelected || isDeletingSelected}
-                >
+                <Button className="justify-center bg-black text-white hover:opacity-90" type="button" onClick={handleKeepSelected} disabled={isConfirmingSelected || isDeletingSelected}>
                   Keep marker
                 </Button>
-                <Button
-                  className="justify-center border-red-200 text-red-700"
-                  type="button"
-                  onClick={handleDeleteSelected}
-                  disabled={isDeletingSelected}
-                >
+                <Button className="justify-center border-red-200 text-red-700" type="button" onClick={handleDeleteSelected} disabled={isDeletingSelected}>
                   {isDeletingSelected ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
@@ -965,49 +784,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-/**
- * Backend sketch (TypeScript) — OPTIONAL, for reference
- * -----------------------------------------------------
- *
- * // app/api/calls/route.ts
- * export const POST = async (req: Request) => {
- *   const form = await req.formData();
- *   const file = form.get("file") as File;
- *   // 1) Store to /tmp or object storage; enqueue background job
- *   // 2) Return job id
- *   const id = crypto.randomUUID();
- *   // enqueueJob({ id, filePath, cpuOnly: true/false })
- *   return Response.json({ id });
- * };
- *
- * // app/api/calls/[id]/route.ts
- * export const GET = async (_req: Request, { params }: { params: { id: string } }) => {
- *   // lookup job status/result in your DB/redis
- *   const row = await db.calls.find(params.id);
- *   return Response.json(row);
- * };
- *
- * // app/api/confirm/route.ts
- * export const POST = async (req: Request) => {
- *   const { id } = await req.json();
- *   // Mark as confirmed, finalize location/marker
- *   const row = await confirmCall(id);
- *   return Response.json(row);
- * };
- *
- * // app/api/incidents/route.ts
- * export const GET = async () => {
- *   const rows = await db.listIncidents();
- *   return Response.json(rows);
- * };
- *
- * // app/api/dispatch/route.ts
- * export const POST = async (req: Request) => {
- *   const { incidentId, channel, message } = await req.json();
- *   // Integrate Twilio / radio / internal messaging
- *   await send({ incidentId, channel, message });
- *   return Response.json({ ok: true });
- * };
- *
- *\*/
