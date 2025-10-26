@@ -31,7 +31,7 @@ You will also need API credentials:
 
 ```bash
 git clone [Github Repository URL]
-cd marina-hacks2
+cd Marina-Hacks2
 ```
 
 
