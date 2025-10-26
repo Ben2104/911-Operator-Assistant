@@ -132,6 +132,59 @@ export default function DashboardPage() {
 
   // Tiny state bump to force a re-render when we mutate dismissed set
   const [, force] = useState(0);
+
+  // ===== PERSISTENCE ADDITIONS (localStorage) =====
+  // Key used to persist dismissed incident IDs
+  const dismissedKey = "911:dismissedIds";
+  // We delay fetching incidents until we've hydrated the dismissed set from storage
+  const [dismissedHydrated, setDismissedHydrated] = useState(false);
+
+  // Persist helper
+  const persistDismissed = useCallback(() => {
+    try {
+      localStorage.setItem(
+        dismissedKey,
+        JSON.stringify(Array.from(dismissedIdsRef.current))
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  // Hydrate dismissed IDs on first mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(dismissedKey);
+      if (raw) {
+        const arr: string[] = JSON.parse(raw);
+        dismissedIdsRef.current = new Set(arr);
+      }
+    } catch {
+      // ignore parse errors
+    }
+    setDismissedHydrated(true);
+  }, []);
+
+  // Keep multiple tabs/windows in sync
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === dismissedKey && e.newValue) {
+        try {
+          const arr: string[] = JSON.parse(e.newValue);
+          dismissedIdsRef.current = new Set(arr);
+          force((v) => v + 1);
+          // refresh incidents to reflect latest dismissals
+          fetchIncidents();
+        } catch {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ===== END PERSISTENCE ADDITIONS =====
   
   // Load Google Maps
   useEffect(() => {
@@ -181,7 +234,7 @@ export default function DashboardPage() {
 
         const merged = [...manual, ...data];
 
-        // Drop anything the operator dismissed
+        // Drop anything the operator dismissed (now persisted)
         return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
       });
 
@@ -190,11 +243,13 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Poll for incidents — gated until dismissed IDs are hydrated
   useEffect(() => {
+    if (!dismissedHydrated) return;
     fetchIncidents();
     const id = setInterval(fetchIncidents, 5000);
     return () => clearInterval(id);
-  }, [fetchIncidents]);
+  }, [fetchIncidents, dismissedHydrated]);
 
   useEffect(() => {
     if (!selectedIncident) return;
@@ -562,8 +617,9 @@ export default function DashboardPage() {
 
     const id = selectedIncident.id;
 
-    // 1) remember dismissal
+    // 1) remember dismissal (persist locally so it survives refresh)
     dismissedIdsRef.current.add(id);
+    persistDismissed(); // <-- NEW: write to localStorage
     // force a re-render (since Set mutation isn’t reactive)
     force((v) => v + 1);
 
@@ -739,7 +795,7 @@ export default function DashboardPage() {
             <Loader2 className="w-6 h-6 animate-spin" />
           </div>
         )}
-        <div className="pointer-events-none absolute top-4 left-4 flex flex-col gap-3 w-full max-w-sm">
+        <div className="pointer-events-none absolute top-4 left-4 flex flex-col gap-3 w/full max-w-sm">
           <div className="rounded-3xl bg-white border border-neutral-200 shadow-xl p-4 pointer-events-auto">
             <div className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">Manual address</div>
             <form className="mt-3 flex flex-col gap-3 text-black" onSubmit={handleManualLocationSubmit}>
