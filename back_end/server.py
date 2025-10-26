@@ -3,10 +3,17 @@ from twilio.twiml.voice_response import VoiceResponse
 from utils import transcribe, parse_event
 import time, io, requests,os
 
-events = [{'Location': "Home",
-           "Incident":"Syn diede"},
-          {'location':"Another Home",
-           'Incident':'Syn died again'}]
+events = [{'Address': "Home",
+           "Incident":"Syn diede",
+           'Lat':33.5,
+           'long':-118.12,
+           'response_time':9},
+          
+          {'Address': "Another Home",
+           "Incident":"Syn diede again",
+           'Lat':-33.5,
+           'long':118.12,
+           'response_time':8}]
 
 app = FastAPI()
 
