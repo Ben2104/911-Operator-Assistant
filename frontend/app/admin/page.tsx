@@ -36,8 +36,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export default function DashboardPage() {
-  const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
+  const autoPannedRef = useRef(false); // we auto-pan only once
+  const userMovedRef = useRef(false);  // stop auto-pan after any user move/click
+  const [map, setMap] = useState<google.maps.Map | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -92,7 +94,7 @@ export default function DashboardPage() {
       case "fire":
         return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/fire.svg", fb: "🔥" };
       case "non-emergency":
-        return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/fire.svg", fb: "ⓘ" };
+        return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/info.svg", fb: "ⓘ" };
       default:
         return { bg: "#ff0000ff", border: "#6b7280", icon: "/icons/emergency.svg", fb: "🚨" };
     }
@@ -173,6 +175,8 @@ export default function DashboardPage() {
           mapId: "911-ops-map",
           disableDefaultUI: false,
         });
+        m.addListener("dragstart", () => (userMovedRef.current = true));
+        m.addListener("zoom_changed", () => (userMovedRef.current = true));
         setMap(m);
       } catch (error) {
         console.error("Failed to load Google Maps", error);
@@ -224,9 +228,12 @@ export default function DashboardPage() {
     let cancelled = false;
 
     const render = async () => {
+      // If a specific center was requested, apply it once and clear it
       if (pendingCenter) {
         map.panTo(pendingCenter);
         map.setZoom(13);
+        setPendingCenter(null);        // ✅ clear so it doesn't keep re-centering
+        autoPannedRef.current = true;  // we've already autopanned once
       }
 
       // clear previous markers
@@ -258,6 +265,7 @@ export default function DashboardPage() {
         });
 
         marker.addListener("click", () => {
+          userMovedRef.current = true; // a click implies intent—don't auto-jump elsewhere
           focusIncidentLocation(inc);
           setSelectedIncident(inc);
         });
@@ -265,21 +273,24 @@ export default function DashboardPage() {
         (map as any).__markers.push(marker);
       }
 
-      const latestWithLoc = [...incidents].reverse().find((i) => i.location);
-      if (latestWithLoc) {
-        map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
+      // Gentle autopan ONCE to the newest marker, only if the user hasn't acted and nothing is selected
+      if (!autoPannedRef.current && !userMovedRef.current && !selectedIncident) {
+        const latestWithLoc = [...incidents].reverse().find((i) => i.location);
+        if (latestWithLoc) {
+          map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
+          autoPannedRef.current = true; // ✅ do this only once
+        }
       }
     };
 
     render();
-
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incidents, map, pendingCenter]);
+  }, [incidents, map, pendingCenter, selectedIncident]);
 
   const focusIncidentLocation = (incident: Incident) => {
+    userMovedRef.current = true;
     if (!incident.location) return;
     const coords = incident.location as google.maps.LatLngLiteral;
     if (map) {
