@@ -21,9 +21,7 @@ def extract_event(audio_file):
 
 
 def parse_event(event):
-    api_key = os.getenv("GOOGLEGEM_API_KEY")
-
-    genai.configure(api_key=api_key)
+    genai.configure(api_key=os.getenv("GOOGLEGEM_API_KEY"))
     model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(
         f"""You are a 911 operator assistant. 
