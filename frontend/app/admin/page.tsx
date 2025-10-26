@@ -587,7 +587,7 @@ export default function DashboardPage() {
   return (
     <div className="h-[calc(100vh-2rem)] w-full p-4 grid grid-cols-1 lg:grid-cols-[30%_70%] gap-4">
       {/* Left: Controls */}
-      <Card className="p-4 flex flex-col gap-4">
+      <Card className="p-4 flex flex-col gap-4 h-full">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <MapPin className="w-5 h-5 text-neutral-500" />
@@ -604,7 +604,7 @@ export default function DashboardPage() {
         {/* Upload */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card className="p-4">
-            <SectionTitle>Upload Call Recording</SectionTitle>
+            <SectionTitle>Upload Recording</SectionTitle>
             <div className="mt-3 flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
@@ -639,13 +639,6 @@ export default function DashboardPage() {
                   <Square className="w-4 h-4" /> Stop
                 </Button>
               )}
-                <Button 
-                onClick={submitRecording} 
-                disabled={!audioChunks.length}
-                className="bg-white text-black hover:opacity-90"
-                >
-                <FileAudio2 className="w-4 h-4" /> Submit recording
-                </Button>
             </div>
             <p className="mt-2 text-xs text-neutral-500">Record, then submit for transcription + analysis.</p>
           </Card>
@@ -654,7 +647,8 @@ export default function DashboardPage() {
         {/* Calls list */}
         <div>
           <SectionTitle>Recent Calls</SectionTitle>
-          <div className="mt-3 flex flex-col gap-3 max-h-72 overflow-auto pr-2">
+          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="mt-3 flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto pr-2"></div>
             {incidents.length === 0 && (
               <div className="text-sm text-neutral-500">No calls yet.</div>
             )}
