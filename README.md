@@ -30,11 +30,10 @@ You will also need API credentials:
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-org>/marina-hacks2.git
+git clone [Github Repository URL]
 cd marina-hacks2
 ```
 
-> Replace `<your-org>` with the actual GitHub org/user if different.
 
 ## 2. Frontend (Next.js Dashboard)
 
