@@ -1,9 +1,7 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
@@ -14,8 +12,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #ededed;
+    --foreground: #000000;
   }
 }
 
@@ -23,4 +21,44 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Smooth in-page anchor scrolling for nav links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Wet Desert background: soft gradient + subtle texture */
+.wet-desert {
+  /* New palette: soft dusty pink → muted lavender */
+  background: linear-gradient(180deg, #E1DADA 0%, #BDCAD9 100%);
+  background-attachment: fixed;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* soft vignette / glow */
+.wet-desert::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Gentle highlights tuned to the new palette */
+  background: radial-gradient(ellipse at 10% 10%, rgba(255,255,255,0.06), transparent 22%),
+              radial-gradient(ellipse at 90% 90%, rgba(189,202,217,0.06), transparent 30%);
+  mix-blend-mode: overlay;
+  opacity: 0.95;
+}
+
+/* subtle grain using tiny repeating linear-gradients for texture (keeps file-size low) */
+.wet-desert::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* subtle warm grain tuned to palette */
+  background-image: linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0,0,0,0.006) 1px, transparent 1px);
+  background-size: 100% 120px, 120px 100%;
+  opacity: 0.55;
 }
