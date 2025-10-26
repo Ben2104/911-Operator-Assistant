@@ -16,8 +16,8 @@ async def get_event(file: UploadFile = File(...)):
     data = await file.read()
     audio_bytes = io.BytesIO(data)
 
-    trasribtion = transcribe(audio_bytes)
-    parsed_event = parse_event(trascribtion)
+    transribtion = transcribe(audio_bytes)
+    parsed_event = parse_event(transribtion)
     end = int(time.time())
 
     if parsed_event:
@@ -25,6 +25,6 @@ async def get_event(file: UploadFile = File(...)):
     else:
         pass
     
-    parsed_event['Transcribtion'] = transcribtion
+    parsed_event['Transcribtion'] = transribtion
     
     return parsed_event
