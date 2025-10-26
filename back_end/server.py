@@ -25,6 +25,6 @@ async def get_event(file: UploadFile = File(...)):
     else:
         pass
     
-    parsed_event['Transcribtion'] = transribtion
+    parsed_event['Transcription'] = transribtion
     
     return parsed_event
