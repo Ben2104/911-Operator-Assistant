@@ -233,7 +233,7 @@ export default function DashboardPage() {
   // Fetch existing incidents
   const fetchIncidents = useCallback(async () => {
     try {
-      const res = await fetch("/api/incidents");
+      const res = await fetch("/api/get-transcript");
       if (!res.ok) return;
       const data: Incident[] = await res.json();
       setIncidents((prev) => {
