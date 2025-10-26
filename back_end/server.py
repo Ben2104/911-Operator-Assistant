@@ -56,8 +56,8 @@ def update_transcript(recording_url: str):
 @app.get('/get-transcript')
 async def get_transcript():
     global events
-    temp = events
-    event = []
+    temp = {'transcript':events}
+    events = []
     return temp 
 
 @app.post("/location")
