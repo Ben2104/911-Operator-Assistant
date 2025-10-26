@@ -2,18 +2,42 @@ from fastapi import FastAPI, UploadFile, File, Response, BackgroundTasks, Form
 from twilio.twiml.voice_response import VoiceResponse
 from utils import transcribe, parse_event
 import time, io, requests,os
+from fastapi.responses import JSONResponse
 
-events = [{'Address': "Home",
-           "Incident":"Syn diede",
-           'Lat':33.5,
-           'long':-118.12,
-           'response_time':9},
-          
-          {'Address': "Another Home",
-           "Incident":"Syn diede again",
-           'Lat':-33.5,
-           'long':118.12,
-           'response_time':8}]
+events = [{
+  "Address": "Crystal Cove, Newport Beach, CA 92657, USA",
+  "Incident": "Medical",
+  "lat": "33.5765961",
+  "long": "-117.8417662",
+  "Response_time?": "7",
+  "Transcription": " Help, I went hiking in Crystal Cove and I broke my leg. I need medical right now, please. I broke my leg."
+}]
+
+# top of file
+from datetime import datetime, timezone
+
+def normalize_event(e: dict) -> dict:
+  lat = str(e.get("lat")) if e.get("lat") is not None else None
+  lng = str(e.get("long") if e.get("long") is not None else e.get("lng")) if (e.get("long") is not None or e.get("lng") is not None) else None
+
+  raw_rt = e.get("Response_time") or e.get("Response_time?") or e.get("Response_time_sec")
+  try:
+    resp_time = int(raw_rt) if raw_rt is not None else None
+  except (TypeError, ValueError):
+    resp_time = None
+
+  # 👇 new
+  created_at = e.get("createdAt") or e.get("timestamp") or datetime.now(timezone.utc).isoformat()
+
+  return {
+    "Address": e.get("Address"),
+    "Incident": e.get("Incident"),
+    "lat": lat,
+    "long": lng,
+    "Response_time": resp_time,
+    "Transcription": e.get("Transcription"),
+    "createdAt": created_at,  # 👈 include it
+  }
 
 app = FastAPI()
 
@@ -66,14 +90,16 @@ def update_transcript(recording_url: str):
 @app.get('/get-transcript')
 async def get_transcript():
     global events
-    temp = {'transcript':events}
+    temp = events
     events = []
-    return temp 
+    normalized = [normalize_event(e) for e in temp]
+    return JSONResponse(content=normalized, media_type="application/json")
+
+
 
 @app.post("/location")
 async def get_event(file: UploadFile = File(...)):
     start = int(time.time())
-
     data = await file.read()
     audio_bytes = io.BytesIO(data)
 
@@ -82,10 +108,11 @@ async def get_event(file: UploadFile = File(...)):
     end = int(time.time())
 
     if parsed_event:
-        parsed_event['Response_time']= end-start
-    else:
-        pass
-    
+        parsed_event['Response_time'] = end - start
+
     parsed_event['Transcription'] = transcription
-    
+    # 👇 ensure createdAt exists even before /get-transcript normalization
+    from datetime import datetime, timezone
+    parsed_event['createdAt'] = datetime.now(timezone.utc).isoformat()
+
     return parsed_event

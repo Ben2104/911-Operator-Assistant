@@ -25,7 +25,6 @@ const RESPONSE_SERVICE_OPTIONS = [
 
 type ResponseService = (typeof RESPONSE_SERVICE_OPTIONS)[number]["key"];
 
-
 type Incident = {
   id: string;
   createdAt: string; // ISO
@@ -59,10 +58,105 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="text-sm font-semibold tracking-wide text-neutral-500 uppercase">{children}</div>;
 }
 
+/** ---------- Stable ID & normalization helpers (content-only IDs) ---------- **/
+  const hasValidLocation = (inc?: Incident | null) =>
+    !!(inc?.location &&
+      Number.isFinite(inc.location.lat) &&
+      Number.isFinite(inc.location.lng));
+
+  // put this above normText/normCoord/makeStableId
+  const djb2 = (str: string) => {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (h * 33) ^ str.charCodeAt(i);
+    return (h >>> 0).toString(36);
+  };
+
+  const normText = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  const normCoord = (v: any) => {
+    const n = parseFloat(String(v ?? "").trim());
+    return Number.isFinite(n) ? n.toFixed(6) : "";
+  };
+
+// Bring any server/client shape into a canonical raw-shape
+const unifyShape = (e: any) => {
+  const lat =
+    e.lat ?? e.Lat ?? e.latitude ?? e.location?.lat ?? e.location?.Lat ?? e.location?.latitude;
+  const lng =
+    e.long ??
+    e.lng ??
+    e.Long ??
+    e.Lng ??
+    e.longitude ??
+    e.location?.long ??
+    e.location?.lng ??
+    e.location?.Long ??
+    e.location?.Lng ??
+    e.location?.longitude;
+
+  return {
+    Address: e.Address ?? e.address ?? e.location?.address ?? "",
+    Incident: e.Incident ?? e.emergencyType ?? e.type ?? "",
+    lat,
+    long: lng,
+    Transcription: e.Transcription ?? e.transcript ?? e.notes ?? "",
+    createdAt: e.createdAt ?? e.timestamp,
+    status: e.status,
+    confidence: e.confidence,
+    tags: e.emergencyTags ?? e.tags,
+    callerPhone: e.From ?? e.callerPhone ?? e.phone,
+  };
+};
+
+  // unchanged
+  const makeRawFingerprint = (e: any) => {
+    const u = unifyShape(e);
+    const addr = normText(u.Address);
+    const lat = normCoord(u.lat);
+    const lng = normCoord(u.long);
+    const txt = normText(u.Transcription);
+    return `${addr}|${lat}|${lng}|${txt}`;
+  };
+
+  // ✅ updated: salt with createdAt if available
+  const makeStableId = (e: any) => {
+    const u = unifyShape(e);
+    const fp = makeRawFingerprint(u);
+    const created = normText(u.createdAt ?? u.timestamp ?? "");
+    return `srv-${djb2(`${fp}|${created}`)}`;
+  };
+
+
+// Fingerprint for Incident objects (used for belt-and-suspenders dedupe)
+const fingerprintIncident = (inc: Incident) => {
+  const addr = normText(inc.location?.address ?? "");
+  const lat = inc.location ? inc.location.lat.toFixed(6) : "";
+  const lng = inc.location ? inc.location.lng.toFixed(6) : "";
+  const txt = normText(inc.transcript ?? inc.notes ?? "");
+  return `${addr}|${lat}|${lng}|${txt}`;
+};
+
+const rank = (s?: Incident["status"]) => (s === "done" ? 3 : s === "needs_confirmation" ? 2 : 1);
+
+const dedupeByFingerprint = (arr: Incident[]) => {
+  const byFp = new Map<string, Incident>();
+  for (const inc of arr) {
+    const fp = fingerprintIncident(inc);
+    const prev = byFp.get(fp);
+    if (!prev || rank(inc.status) >= rank(prev.status)) {
+      byFp.set(fp, prev ? { ...prev, ...inc } : inc);
+    }
+  }
+  return Array.from(byFp.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+};
+/** ------------------------------------------------------------------------ **/
+
 export default function DashboardPage() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const autoPannedRef = useRef(false); // we auto-pan only once
-  const userMovedRef = useRef(false);  // stop auto-pan after any user move/click
+  const userMovedRef = useRef(false); // stop auto-pan after any user move/click
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
@@ -73,7 +167,7 @@ export default function DashboardPage() {
   const [selectedUploadName, setSelectedUploadName] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [cpuMode, setCpuMode] = useState(true);
+  const [cpuMode] = useState(true);
   const [loadingMap, setLoadingMap] = useState(true);
   const [pendingCenter, setPendingCenter] = useState<google.maps.LatLngLiteral | null>(null);
   const [manualLatitude, setManualLatitude] = useState("");
@@ -87,7 +181,7 @@ export default function DashboardPage() {
   const [confirmingManual, setConfirmingManual] = useState(false);
   const [confirmManualError, setConfirmManualError] = useState<string | null>(null);
   const [selectedActionError, setSelectedActionError] = useState<string | null>(null);
-  const [isConfirmingSelected, setIsConfirmingSelected] = useState(false);
+  const [isConfirmingSelected] = useState(false);
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
   const [serviceSelections, setServiceSelections] = useState<Record<string, ResponseService[]>>({});
   const [dispatchingServiceId, setDispatchingServiceId] = useState<string | null>(null);
@@ -105,6 +199,7 @@ export default function DashboardPage() {
       localStorage.setItem(dismissedKey, JSON.stringify(Array.from(dismissedIdsRef.current)));
     } catch {}
   }, []);
+
 
   // --- Helpers for marker styling ---
   // Normalize type strings like "Non-emergency:" → "non-emergency"
@@ -171,6 +266,45 @@ export default function DashboardPage() {
       };
     });
   };
+
+  // Flexible array extractor
+  const pickArray = (payload: any): any[] => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== "object") return [];
+    return payload.transcript ?? payload.transcripts ?? payload.incidents ?? payload.data ?? payload.items ?? [];
+  };
+
+  const toNumber = (v: unknown): number | null => {
+    if (v == null) return null;
+    const n = typeof v === "number" ? v : parseFloat(String(v).trim());
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const normalizeLocation = (e: any) => {
+    // try nested location first
+    if (e.location && typeof e.location === "object") {
+      const lat = toNumber(e.location.lat ?? e.location.Lat ?? e.location.latitude ?? e.location.Latitude);
+      const lng = toNumber(
+        e.location.lng ??
+          e.location.long ??
+          e.location.Long ??
+          e.location.Lng ??
+          e.location.longitude ??
+          e.location.Longitude
+      );
+      if (lat != null && lng != null) {
+        return { lat, lng, address: e.location.address ?? e.Address ?? e.address };
+      }
+    }
+
+    // fall back to flat keys
+    const lat = toNumber(e.lat ?? e.Lat ?? e.latitude ?? e.Latitude);
+    const lng = toNumber(e.lng ?? e.long ?? e.Lng ?? e.Long ?? e.longitude ?? e.Longitude);
+    if (lat != null && lng != null) {
+      return { lat, lng, address: e.Address ?? e.address };
+    }
+    return null;
+  };
   // --- end helpers ---
 
   useEffect(() => {
@@ -191,7 +325,7 @@ export default function DashboardPage() {
           const arr: string[] = JSON.parse(e.newValue);
           dismissedIdsRef.current = new Set(arr);
           force((v) => v + 1);
-          fetchIncidents();
+          fetchTranscripts();
         } catch {}
       }
     };
@@ -231,23 +365,52 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Fetch existing incidents
+  // merge helper: overlay by id, then dedupe-by-fingerprint, and sort newest→oldest
+  const mergeFromServer = (prev: Incident[], incoming: Incident[]) => {
+    const out = new Map(prev.map((p) => [p.id, p]));
+    for (const inc of incoming) {
+      const prevInc = out.get(inc.id);
+      out.set(inc.id, prevInc ? { ...prevInc, ...inc } : inc);
+    }
+    const filtered = Array.from(out.values()).filter((i) => !dismissedIdsRef.current.has(i.id));
+    return dedupeByFingerprint(filtered);
+  };
+
   const fetchTranscripts = useCallback(async () => {
     try {
-      const res = await fetch("/api/get-transcripts", { cache: "no-store" });
+      const res = await fetch(`/api/get-transcript?ts=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) return;
-      const data: Incident[] = await res.json();
-      
-      // Only update if we have new data
-      if (data.length > 0) {
-        setIncidents((prev) => {
-          const manual = prev.filter(
-            (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
-          );
-          const merged = [...data, ...manual];
-          return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
-        });
-      }
+
+      const payload = await res.json();
+      const raw = pickArray(payload);
+      if (!Array.isArray(raw) || raw.length === 0) return;
+
+      const mapped: Incident[] = raw.map((e: any) => {
+        const u = unifyShape(e);
+        const type = (u.Incident || "").toString().trim().toLowerCase() || undefined;
+
+        return {
+          id: makeStableId(u),
+          createdAt: u.createdAt || new Date().toISOString(),
+          transcript: u.Transcription || undefined,
+          notes: undefined,
+          emergencyType: type,
+          emergencyTags: u.tags ?? (type ? [type] : undefined),
+          confidence: typeof u.confidence === "number" ? u.confidence : undefined,
+          location: (() => {
+            const lat = parseFloat(String(u.lat ?? ""));
+            const lng = parseFloat(String(u.long ?? ""));
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              return { lat, lng, address: u.Address || undefined };
+            }
+            return null;
+          })(),
+          callerPhone: u.callerPhone,
+          status: u.status || "needs_confirmation",
+        };
+      });
+
+      setIncidents((prev) => mergeFromServer(prev, mapped));
     } catch (e) {
       console.error("Failed to fetch transcripts", e);
     }
@@ -256,32 +419,9 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!dismissedHydrated) return;
     fetchTranscripts();
-    const id = setInterval(fetchTranscripts, 3000);
-    return () => clearInterval(id);
+    const id = window.setInterval(fetchTranscripts, 3000);
+    return () => window.clearInterval(id);
   }, [fetchTranscripts, dismissedHydrated]);
-
-  const fetchIncidents = useCallback(async () => {
-    try {
-      const res = await fetch("/api/incidents", { cache: "no-store" });
-      if (!res.ok) return;
-      const data: Incident[] = await res.json();
-      setIncidents((prev) => {
-        const manual = prev.filter(
-          (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
-        );
-        const merged = [...data, ...manual];
-        return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
-      });
-    } catch (e) {
-      console.error("Failed to fetch incidents", e);
-    }
-  }, []);
-  useEffect(() => {
-    if (!dismissedHydrated) return;
-    fetchIncidents();
-    const id = setInterval(fetchIncidents, 3000);
-    return () => clearInterval(id);
-  }, [fetchIncidents, dismissedHydrated]);
 
   useEffect(() => {
     if (!selectedIncident) return;
@@ -302,8 +442,8 @@ export default function DashboardPage() {
       if (pendingCenter) {
         map.panTo(pendingCenter);
         map.setZoom(13);
-        setPendingCenter(null);        // ✅ clear so it doesn't keep re-centering
-        autoPannedRef.current = true;  // we've already autopanned once
+        setPendingCenter(null); // ✅ clear so it doesn't keep re-centering
+        autoPannedRef.current = true; // we've already autopanned once
       }
 
       // clear previous markers
@@ -511,18 +651,26 @@ export default function DashboardPage() {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const data = JSON.parse(xhr.responseText);
-            const id = data.id as string;
+            const id = String(data.id);
+
+            // show a local "processing" card immediately so it doesn't flash/disappear
+            setIncidents((prev) => [{ id, createdAt: new Date().toISOString(), status: "processing" } as Incident, ...prev]);
+
             setUploadProgress(null);
             setSelectedUploadName(null);
             setUploadingId(id);
+            pollJob(id); // start polling this job (will be stored in pollTimersRef)
             setTimeout(() => setUploadingId((curr) => (curr === id ? null : curr)), 1200);
+            resolve({ id });
           } catch (err) {
             setUploadError("Invalid server response");
             setUploadProgress(null);
+            reject(err as any);
           }
         } else {
           setUploadError(`Upload failed (${xhr.status})`);
           setUploadProgress(null);
+          reject(new Error(`Upload failed (${xhr.status})`));
         }
       };
 
@@ -548,49 +696,118 @@ export default function DashboardPage() {
     await uploadBlob(blob);
     setAudioChunks([]);
   };
+  // Unwrap common server shapes (array, {data}, {result}, {incident}, {event}, etc.)
+  const unwrapIncident = (raw: any) => {
+    if (Array.isArray(raw)) return raw[0] ?? {};
+    if (raw && typeof raw === "object") {
+      const inner = raw.incident ?? raw.event ?? raw.data ?? raw.result ?? raw.payload ?? raw.item ?? raw;
+      return Array.isArray(inner) ? (inner[0] ?? {}) : inner;
+    }
+    return {};
+  };
 
-  const pollJob = async (id: string) => {
+  // Decide if the normalized shape has anything useful yet
+  const hasUsefulFields = (u: any) => {
+    const hasText = !!normText(u.Transcription);
+    const hasType = !!normText(u.Incident);
+    const hasAddr = !!normText(u.Address);
+    const latOk = Number.isFinite(parseFloat(String(u.lat ?? "")));
+    const lngOk = Number.isFinite(parseFloat(String(u.long ?? "")));
+    const hasCoords = latOk && lngOk;
+    return hasText || hasType || hasAddr || hasCoords;
+  };
+
+  const pollJob = async (jobId: string) => {
     let attempts = 0;
     const maxAttempts = 120;
     const interval = 5000;
 
-    const timer = setInterval(async () => {
+    const timer = window.setInterval(async () => {
       attempts++;
 
       try {
-        const res = await fetch(`/api/calls/${id}`);
-        if (!res.ok) {
+        const res = await fetch(`/api/calls/${jobId}`);
+        if (!res.ok) return;
+
+        const raw = await res.json();
+        const obj = unwrapIncident(raw);          // 👈 unwrap
+        const u = unifyShape(obj);
+
+        // If the server hasn’t filled anything in yet, keep the placeholder visible
+        if (!hasUsefulFields(u)) return;          // 👈 do nothing until we have content
+
+        const stableId = makeStableId(u);
+
+        const normalized: Incident = {
+          id: stableId,
+          createdAt: u.createdAt || new Date().toISOString(),
+          transcript: u.Transcription || undefined,
+          notes: undefined,
+          emergencyType: (u.Incident || "").toString().trim().toLowerCase() || undefined,
+          emergencyTags: u.tags ?? undefined,
+          confidence: typeof u.confidence === "number" ? u.confidence : undefined,
+          location: (() => {
+            const lat = parseFloat(String(u.lat ?? ""));
+            const lng = parseFloat(String(u.long ?? ""));
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              return { lat, lng, address: u.Address || undefined };
+            }
+            return null;
+          })(),
+          callerPhone: u.callerPhone,
+          status: u.status || "needs_confirmation",
+        };
+
+        // If user deleted/dismissed this id, stop polling and do not re-add it.
+        if (dismissedIdsRef.current.has(stableId)) {
+          window.clearInterval(timer);
+          pollTimersRef.current.delete(jobId);
           return;
         }
-        const data: Incident = await res.json();
 
         setIncidents((prev) => {
-          const idx = prev.findIndex((p) => p.id === data.id);
-          const next = [...prev];
-          if (idx >= 0) next[idx] = { ...next[idx], ...data };
-          else next.unshift(data);
-          return next;
+          // drop the placeholder row (jobId) and any transient server id
+          let next = prev.filter(
+            (p) => p.id !== jobId && p.id !== (obj.id as string) && p.id !== stableId
+          );
+
+          // merge/insert normalized
+          const idx = next.findIndex((p) => p.id === stableId);
+          if (idx >= 0) next[idx] = { ...next[idx], ...normalized };
+          else next = [normalized, ...next];
+
+          return dedupeByFingerprint(next);
         });
 
-        if (data.status === "needs_confirmation" || data.status === "done") {
-          setUploadingId((curr) => (curr === id ? null : curr));
+        if (normalized.status === "needs_confirmation" || normalized.status === "done") {
+          setUploadingId((curr) => (curr === jobId ? null : curr));
         }
 
-        if (data.status === "done") {
-          clearInterval(timer);
+        if (normalized.status === "done") {
+          window.clearInterval(timer);
+          pollTimersRef.current.delete(jobId);
         }
       } catch (e) {
         console.error(e);
       }
 
       if (attempts >= maxAttempts) {
-        clearInterval(timer);
-        setUploadingId((curr) => (curr === id ? null : curr));
+        window.clearInterval(timer);
+        pollTimersRef.current.delete(jobId);
+        setUploadingId((curr) => (curr === jobId ? null : curr));
       }
     }, interval);
+
+    pollTimersRef.current.set(jobId, timer);
   };
 
+
   const confirmIncident = async (incident: Incident): Promise<Incident | null> => {
+    if (!hasValidLocation(incident)) {
+        // Optional: surface a message in the inspector if it's open
+        setSelectedActionError("This incident has no location yet. Add an address or coordinates before confirming.");
+        return null;
+    }
     const payload: {
       id?: string;
       address?: string;
@@ -601,6 +818,7 @@ export default function DashboardPage() {
       notes?: string;
       createdAt?: string;
     } = {};
+
     if (incident.id) payload.id = incident.id;
     const address = incident.location?.address?.trim();
     if (address) payload.address = address;
@@ -619,37 +837,59 @@ export default function DashboardPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Confirmation failed");
-      const data: Incident = await res.json();
+
+      // server may return a different shape — normalize it to our stable id
+      const serverData = await res.json();
+      const u = unifyShape(serverData);
+      const stableId = makeStableId(u);
+
+      const normalized: Incident = {
+        id: stableId,
+        createdAt: u.createdAt || new Date().toISOString(),
+        transcript: u.Transcription || undefined,
+        notes: undefined,
+        emergencyType: (u.Incident || "").toString().trim().toLowerCase() || undefined,
+        emergencyTags: u.tags ?? undefined,
+        confidence: typeof u.confidence === "number" ? u.confidence : undefined,
+        location: (() => {
+          const lat = parseFloat(String(u.lat ?? ""));
+          const lng = parseFloat(String(u.long ?? ""));
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            return { lat, lng, address: u.Address || undefined };
+          }
+          return null;
+        })(),
+        callerPhone: u.callerPhone,
+        status: u.status || "needs_confirmation",
+      };
 
       setIncidents((prev) => {
-        let hasMatch = false;
-        let next = prev.map((p) => {
-          if (p.id === data.id) {
-            hasMatch = true;
-            return { ...p, ...data };
-          }
-          return p;
-        });
-        if (!hasMatch) {
-          next = [data, ...next];
-        }
-        if (incident.id && incident.id.startsWith("manual-") && incident.id !== data.id) {
-          next = next.filter((p) => p.id !== incident.id);
-        }
-        return next;
+        // if the server's stable id is different, remove the old placeholder row
+        let next = prev.filter((p) => p.id !== incident.id || incident.id === stableId);
+
+        // merge/insert the normalized confirmed incident
+        const idx = next.findIndex((p) => p.id === stableId);
+        if (idx >= 0) next[idx] = { ...next[idx], ...normalized };
+        else next = [normalized, ...next];
+
+        return dedupeByFingerprint(next);
       });
 
+      // keep the inspector in sync
       setSelectedIncident((current) => {
         if (!current) return current;
-        if (current.id === data.id) return { ...current, ...data };
-        if (current.id === incident.id && incident.id !== data.id) return { ...data };
+        if (current.id === incident.id && incident.id !== stableId) return { ...normalized };
+        if (current.id === stableId) return { ...current, ...normalized };
         return current;
       });
 
-      setUploadingId((curr) => (curr === incident.id || curr === data.id ? null : curr));
-
+      // clear any pending manual link
       if (pendingManualId === incident.id) setPendingManualId(null);
-      return data;
+
+      // clear the uploading pill if it’s still around
+      setUploadingId((curr) => (curr === incident.id || curr === stableId ? null : curr));
+
+      return normalized;
     } catch (err) {
       console.error(err);
       return null;
@@ -694,16 +934,19 @@ export default function DashboardPage() {
 
     const id = selectedIncident.id;
 
+    // mark dismissed and persist (used by all pollers and merges)
     dismissedIdsRef.current.add(id);
     persistDismissed();
     force((v) => v + 1);
 
+    // stop any active poller for this id
     const timer = pollTimersRef.current.get(id);
-    if (timer) {
-      clearInterval(timer);
+    if (typeof timer === "number") {
+      window.clearInterval(timer);
       pollTimersRef.current.delete(id);
     }
 
+    // remove from local state
     setIncidents((prev) => prev.filter((inc) => inc.id !== id));
     if (pendingManualId === id) setPendingManualId(null);
 
@@ -728,7 +971,7 @@ export default function DashboardPage() {
   };
 
   const handleDispatchServices = async (incident: Incident) => {
-    const selected = serviceSelections[incident.id] ?? [];
+    const selected = (serviceSelections[incident.id] ?? []) as ResponseService[];
     if (!selected.length) {
       setDispatchNotices((prev) => ({ ...prev, [incident.id]: { error: "Pick at least one service." } }));
       return;
@@ -874,11 +1117,17 @@ export default function DashboardPage() {
                   >
                     <MapPin className="w-4 h-4" /> View on map
                   </Button>
-                  {cpuMode && inc.status === "needs_confirmation" && (
-                    <Button className="flex-1 justify-center bg-black text-white" onClick={() => confirmIncident(inc)}>
-                      Confirm & Mark
-                    </Button>
-                  )}
+                    {cpuMode && inc.status === "needs_confirmation" && (
+                      <Button
+                        className={`flex-1 justify-center ${hasValidLocation(inc) ? "bg-black text-white" : ""}`}
+                        onClick={() => hasValidLocation(inc) ? confirmIncident(inc) : null}
+                        disabled={!hasValidLocation(inc)}
+                        title={hasValidLocation(inc) ? undefined : "Add a location before confirming."}
+                      >
+                        Confirm & Mark
+                      </Button>
+                    )}
+
                 </div>
               </Card>
             ))}
@@ -935,7 +1184,6 @@ export default function DashboardPage() {
                 <div className="mt-2 flex flex-wrap gap-2">
                   {MANUAL_TYPE_OPTIONS.map((option) => {
                     const isActive = manualTypes.includes(option.value);
-                    console.log(option.value, isActive);
                     return (
                       <button
                         key={option.value}
@@ -998,7 +1246,7 @@ export default function DashboardPage() {
         </div>
 
         {selectedIncident && (
-          <div className="pointer-events-none absolute top-4 right-4 w/full max-w-sm">
+          <div className="pointer-events-none absolute top-4 right-4 w-full max-w-sm">
             <div className="pointer-events-auto rounded-3xl bg-white border border-neutral-200 shadow-xl p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
