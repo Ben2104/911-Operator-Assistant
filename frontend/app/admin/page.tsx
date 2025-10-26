@@ -741,7 +741,7 @@ export default function DashboardPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">Marker details</div>
-                  <div className="text-lg font-semibold text-neutral-900">#{selectedIncident.id}</div>
+                  <div className="text-lg font-semibold text-neutral-900">{selectedIncident.id}</div>
                 </div>
                 <Button className="text-sm text-black" onClick={() => setSelectedIncident(null)}>
                   Close
