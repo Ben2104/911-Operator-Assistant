@@ -690,7 +690,11 @@ export default function DashboardPage() {
       else next.add(service);
       return { ...prev, [incidentId]: Array.from(next) };
     });
-    setDispatchNotices((prev) => ({ ...prev, [incidentId]: undefined }));
+    setDispatchNotices((prev) => {
+      const next = { ...prev };
+      delete next[incidentId];
+      return next;
+    });
   };
 
   const handleDispatchServices = async (incident: Incident) => {
