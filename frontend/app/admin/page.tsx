@@ -75,6 +75,60 @@ export default function DashboardPage() {
     } catch {}
   }, []);
 
+  // --- Helpers for marker styling ---
+  // Normalize type strings like "Non-emergency:" → "non-emergency"
+  const getTypeKey = (t?: string) => (t || "non-emergency").replace(/:\s*$/, "").trim().toLowerCase();
+
+  // Human-friendly label without trailing colon
+  const formatTypeLabel = (t?: string) => (t ? t.replace(/:\s*$/, "") : "Unknown");
+
+  // Map type → colors + icon path + fallback glyph
+  const pinConfigFor = (typeKey: string) => {
+    switch (typeKey) {
+      case "crime":
+        return { bg: "#dbeafe", border: "#1d4ed8", icon: "/icons/handcuffs.svg", fb: "🚓" };
+      case "medical":
+        return { bg: "#fee2e2", border: "#dc2626", icon: "/icons/cross.svg", fb: "✚" };
+      case "fire":
+        return { bg: "#ffedd5", border: "#ea580c", icon: "/icons/fire.svg", fb: "🔥" };
+      case "non-emergency":
+      default:
+        return { bg: "#e5e7eb", border: "#6b7280", icon: "/icons/info.svg", fb: "ⓘ" };
+    }
+  };
+
+  // Build a PinElement element; fallback to emoji glyph if the image fails
+  const makePin = (iconUrl: string, bg: string, border: string, fallbackGlyph: string): Promise<HTMLElement> => {
+    const img = document.createElement("img");
+    img.src = iconUrl; // expects icons in /public/icons/...
+    img.width = 18;
+    img.height = 18;
+    img.alt = "";
+    img.style.display = "block";
+    img.style.pointerEvents = "none";
+
+    return new Promise<HTMLElement>((resolve) => {
+      img.onerror = () => {
+        const pin = new (google.maps as any).marker.PinElement({
+          background: bg,
+          borderColor: border,
+          glyph: fallbackGlyph,
+          glyphColor: "#111827",
+        });
+        resolve(pin.element);
+      };
+      img.onload = () => {
+        const pin = new (google.maps as any).marker.PinElement({
+          background: bg,
+          borderColor: border,
+          glyph: img,
+        });
+        resolve(pin.element);
+      };
+    });
+  };
+  // --- end helpers ---
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(dismissedKey);
@@ -105,12 +159,9 @@ export default function DashboardPage() {
   // Load Google Maps
   useEffect(() => {
     let cancelled = false;
-
     const initMap = async () => {
       const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!key) {
-        console.warn("Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY");
-      }
+      if (!key) console.warn("Missing NEXT_PUBLIC_GOOGLE_MAPS_API_KEY");
       try {
         setOptions({ key: key || "", v: "weekly" });
         await Promise.all([importLibrary("maps"), importLibrary("marker")]);
@@ -128,9 +179,7 @@ export default function DashboardPage() {
         if (!cancelled) setLoadingMap(false);
       }
     };
-
     initMap();
-
     return () => {
       cancelled = true;
     };
@@ -143,9 +192,7 @@ export default function DashboardPage() {
       if (!res.ok) return;
       const data: Incident[] = await res.json();
       setIncidents((prev) => {
-        const manual = prev.filter(
-          (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
-        );
+        const manual = prev.filter((inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id));
         const merged = [...manual, ...data];
         return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
       });
@@ -172,34 +219,64 @@ export default function DashboardPage() {
   // Render markers
   useEffect(() => {
     if (!map) return;
-    if (pendingCenter) {
-      map.panTo(pendingCenter);
-      map.setZoom(13);
-      setPendingCenter(null);
-    }
 
-    (map as any).__markers?.forEach((mk: google.maps.marker.AdvancedMarkerElement) => (mk.map = null));
-    (map as any).__markers = [];
+    let cancelled = false;
 
-    incidents.forEach((inc) => {
-      if (!inc.location) return;
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map,
-        position: inc.location,
-        title: `${inc.emergencyType || "Incident"} ${((inc.confidence ?? 0) * 100) | 0}%`,
-      });
-      marker.addListener("click", () => {
-        focusIncidentLocation(inc);
-        setSelectedIncident(inc);
-      });
-      (map as any).__markers.push(marker);
-    });
+    const render = async () => {
+      if (pendingCenter) {
+        map.panTo(pendingCenter);
+        map.setZoom(13);
+      }
 
-    const latestWithLoc = [...incidents].reverse().find((i) => i.location);
-    if (latestWithLoc) {
-      map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
-    }
-  }, [incidents, map]);
+      // clear previous markers
+      (map as any).__markers?.forEach((mk: google.maps.marker.AdvancedMarkerElement) => (mk.map = null));
+      (map as any).__markers = [];
+
+      if (!(google.maps as any)?.marker?.AdvancedMarkerElement) {
+        console.error("Marker library not loaded yet.");
+        return;
+      }
+
+      for (const inc of incidents) {
+        if (cancelled) break;
+        if (!inc.location) continue;
+
+        const typeKey = getTypeKey(inc.emergencyType);
+        const cfg = pinConfigFor(typeKey);
+
+        // Build pin content (with fallback)
+        const contentEl = await makePin(cfg.icon, cfg.bg, cfg.border, cfg.fb);
+
+        const marker = new (google.maps as any).marker.AdvancedMarkerElement({
+          map,
+          position: inc.location as google.maps.LatLngLiteral,
+          title: inc.emergencyType || "Incident",
+          content: contentEl,
+          collisionBehavior: (google.maps as any).CollisionBehavior?.REQUIRED,
+          zIndex: 1000,
+        });
+
+        marker.addListener("click", () => {
+          focusIncidentLocation(inc);
+          setSelectedIncident(inc);
+        });
+
+        (map as any).__markers.push(marker);
+      }
+
+      const latestWithLoc = [...incidents].reverse().find((i) => i.location);
+      if (latestWithLoc) {
+        map.panTo(latestWithLoc.location as google.maps.LatLngLiteral);
+      }
+    };
+
+    render();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incidents, map, pendingCenter]);
 
   const focusIncidentLocation = (incident: Incident) => {
     if (!incident.location) return;
@@ -232,27 +309,21 @@ export default function DashboardPage() {
       if (hasCoords) {
         const lat = Number(manualLatitude);
         const lng = Number(manualLongitude);
-        if (Number.isNaN(lat) || Number.isNaN(lng)) {
-          throw new Error("Latitude and longitude must be valid numbers.");
-        }
+        if (Number.isNaN(lat) || Number.isNaN(lng)) throw new Error("Latitude and longitude must be valid numbers.");
         coords = { lat, lng };
       } else if (hasAddress) {
-        if (typeof google === "undefined" || !google.maps?.Geocoder) {
+        if (typeof google === "undefined" || !(google.maps as any)?.Geocoder) {
           throw new Error("Maps API not ready. Please wait a moment and try again.");
         }
         const geocoder = new google.maps.Geocoder();
         const geocodeResult = await geocoder.geocode({ address: resolvedAddress });
-        if (!geocodeResult.results?.length) {
-          throw new Error("No results for that address.");
-        }
+        if (!geocodeResult.results?.length) throw new Error("No results for that address.");
         const best = geocodeResult.results[0];
         coords = best.geometry.location?.toJSON();
         resolvedAddress = best.formatted_address || resolvedAddress;
       }
 
-      if (!coords) {
-        throw new Error("Unable to resolve coordinates.");
-      }
+      if (!coords) throw new Error("Unable to resolve coordinates.");
 
       if (map) {
         map.panTo(coords);
@@ -345,7 +416,6 @@ export default function DashboardPage() {
           try {
             const data = JSON.parse(xhr.responseText);
             const id = data.id as string;
-
             setUploadProgress(null);
             setSelectedUploadName(null);
             setUploadingId(id);
@@ -470,6 +540,7 @@ export default function DashboardPage() {
     const match = address.match(/\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b|\b\d{5}(?:-\d{4})?\b/i);
     return match ? match[0] : null;
   };
+
   const handleKeepSelected = () => {
     if (!selectedIncident) return;
     setIncidents((prev) => prev.map((p) => (p.id === selectedIncident.id ? { ...p, confirmedAt: null } : p)));
@@ -579,13 +650,13 @@ export default function DashboardPage() {
 
                 <div className="pr-32">
                   <div className="flex items-center gap-2 text-sm mb-2">
-                    {/* <span className="font-semibold text-black">#{inc.id}</span> */}
                     <span className="text-neutral-500">{new Date(inc.createdAt || Date.now()).toLocaleString()}</span>
                   </div>
 
                   <div className="text-sm space-y-1">
                     <div>
-                      <span className="text-neutral-500">Type:</span> <span className="text-black">{inc.emergencyType || "Unknown"}</span>
+                      <span className="text-neutral-500">Type:</span>{" "}
+                      <span className="text-black">{formatTypeLabel(inc.emergencyType)}</span>
                       {typeof inc.confidence === "number" && <span className="ml-2 text-black">({Math.round((inc.confidence || 0) * 100)}%)</span>}
                     </div>
 
@@ -599,10 +670,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-baseline gap-1">
                       <span className="text-neutral-500 shrink-0">Transcript:</span>
-                      <span
-                        className="text-black flex-1 min-w-0 truncate"
-                        title={inc.transcript || "—"}  // shows full text on hover
-                      >
+                      <span className="text-black flex-1 min-w-0 truncate" title={inc.transcript || "—"}>
                         {inc.transcript || "—"}
                       </span>
                     </div>
@@ -617,7 +685,13 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="mt-3 flex gap-2">
-                  <Button className="flex-1 justify-center text-black" onClick={() => { focusIncidentLocation(inc); setSelectedIncident(inc); }}>
+                  <Button
+                    className="flex-1 justify-center text-black"
+                    onClick={() => {
+                      focusIncidentLocation(inc);
+                      setSelectedIncident(inc);
+                    }}
+                  >
                     <MapPin className="w-4 h-4" /> View on map
                   </Button>
                   {cpuMode && inc.status === "needs_confirmation" && (
@@ -727,7 +801,7 @@ export default function DashboardPage() {
                     <div className="text-sm font-medium truncate text-black">
                       {pin.location?.address || `${pin.location?.lat.toFixed(4)}, ${pin.location?.lng.toFixed(4)}`}
                     </div>
-                    <div className="text-xs text-black truncate">{pin.emergencyType || "Manual entry"}</div>
+                    <div className="text-xs text-black truncate">{formatTypeLabel(pin.emergencyType) || "Manual entry"}</div>
                   </div>
                   <ChevronRight className="w-4 h-4 text-neutral-400" />
                 </button>
@@ -735,8 +809,9 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
         {selectedIncident && (
-          <div className="pointer-events-none absolute top-4 right-4 w-full max-w-sm">
+          <div className="pointer-events-none absolute top-4 right-4 w/full max-w-sm">
             <div className="pointer-events-auto rounded-3xl bg-white border border-neutral-200 shadow-xl p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -752,7 +827,7 @@ export default function DashboardPage() {
                   <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
                 </div>
                 <div>
-                  <span className="text-neutral-500">Type:</span> <span className="text-black">{selectedIncident.emergencyType || "—"}</span>
+                  <span className="text-neutral-500">Type:</span> <span className="text-black">{formatTypeLabel(selectedIncident.emergencyType) || "—"}</span>
                 </div>
                 <div>
                   <span className="text-neutral-500">Coordinates:</span>{" "}
