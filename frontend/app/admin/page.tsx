@@ -25,6 +25,7 @@ const RESPONSE_SERVICE_OPTIONS = [
 
 type ResponseService = (typeof RESPONSE_SERVICE_OPTIONS)[number]["key"];
 
+
 type Incident = {
   id: string;
   createdAt: string; // ISO
@@ -231,25 +232,54 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch existing incidents
-  const fetchIncidents = useCallback(async () => {
+  const fetchTranscripts = useCallback(async () => {
     try {
-      const res = await fetch("/api/get-transcript");
+      const res = await fetch("/api/get-transcripts", { cache: "no-store" });
       if (!res.ok) return;
       const data: Incident[] = await res.json();
-      setIncidents((prev) => {
-        const manual = prev.filter((inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id));
-        const merged = [...manual, ...data];
-        return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
-      });
+      
+      // Only update if we have new data
+      if (data.length > 0) {
+        setIncidents((prev) => {
+          const manual = prev.filter(
+            (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
+          );
+          const merged = [...data, ...manual];
+          return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
+        });
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to fetch transcripts", e);
     }
   }, []);
 
   useEffect(() => {
     if (!dismissedHydrated) return;
+    fetchTranscripts();
+    const id = setInterval(fetchTranscripts, 3000);
+    return () => clearInterval(id);
+  }, [fetchTranscripts, dismissedHydrated]);
+
+  const fetchIncidents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/incidents", { cache: "no-store" });
+      if (!res.ok) return;
+      const data: Incident[] = await res.json();
+      setIncidents((prev) => {
+        const manual = prev.filter(
+          (inc) => inc.id.startsWith("manual-") && !data.some((remote) => remote.id === inc.id)
+        );
+        const merged = [...data, ...manual];
+        return merged.filter((i) => !dismissedIdsRef.current.has(i.id));
+      });
+    } catch (e) {
+      console.error("Failed to fetch incidents", e);
+    }
+  }, []);
+  useEffect(() => {
+    if (!dismissedHydrated) return;
     fetchIncidents();
-    const id = setInterval(fetchIncidents, 5000);
+    const id = setInterval(fetchIncidents, 3000);
     return () => clearInterval(id);
   }, [fetchIncidents, dismissedHydrated]);
 
