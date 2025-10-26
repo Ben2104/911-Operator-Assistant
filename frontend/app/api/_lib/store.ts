@@ -11,6 +11,7 @@ export type IncidentRecord = {
   confirmedAt?: string | null;
   notes?: string;
   error?: string;
+  emergencyTags?: string[];
 };
 
 type GlobalWithStore = typeof globalThis & {

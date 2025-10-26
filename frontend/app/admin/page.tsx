@@ -4,11 +4,34 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
 import { Mic, Square, Upload, MapPin, Loader2, CheckCircle2, TriangleAlert, Search, ChevronRight, Trash2 } from "lucide-react";
 
+const MANUAL_TYPE_OPTIONS = [
+  { value: "crime", label: "Crime" },
+  { value: "medical", label: "Medical" },
+  { value: "fire", label: "Fire" },
+] as const;
+
+type ManualIncidentType = (typeof MANUAL_TYPE_OPTIONS)[number]["value"];
+const MANUAL_TYPE_LABEL: Record<ManualIncidentType, string> = {
+  crime: "Crime",
+  medical: "Medical",
+  fire: "Fire",
+};
+
+const RESPONSE_SERVICE_OPTIONS = [
+  { key: "firetrucks", label: "Firetrucks" },
+  { key: "cops", label: "Cops" },
+  { key: "ambulance", label: "Ambulance" },
+] as const;
+
+type ResponseService = (typeof RESPONSE_SERVICE_OPTIONS)[number]["key"];
+
 type Incident = {
   id: string;
   createdAt: string; // ISO
   transcript?: string;
+  notes?: string;
   emergencyType?: string;
+  emergencyTags?: string[];
   confidence?: number; // 0..1
   location?: { lat: number; lng: number; address?: string } | null;
   callerPhone?: string;
@@ -56,6 +79,8 @@ export default function DashboardPage() {
   const [manualLongitude, setManualLongitude] = useState("");
   const [manualAddress, setManualAddress] = useState("");
   const [manualLocationError, setManualLocationError] = useState<string | null>(null);
+  const [manualTypes, setManualTypes] = useState<ManualIncidentType[]>([MANUAL_TYPE_OPTIONS[0].value]);
+  const [manualTypeError, setManualTypeError] = useState<string | null>(null);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [pendingManualId, setPendingManualId] = useState<string | null>(null);
   const [confirmingManual, setConfirmingManual] = useState(false);
@@ -63,6 +88,9 @@ export default function DashboardPage() {
   const [selectedActionError, setSelectedActionError] = useState<string | null>(null);
   const [isConfirmingSelected, setIsConfirmingSelected] = useState(false);
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
+  const [serviceSelections, setServiceSelections] = useState<Record<string, ResponseService[]>>({});
+  const [dispatchingServiceId, setDispatchingServiceId] = useState<string | null>(null);
+  const [dispatchNotices, setDispatchNotices] = useState<Record<string, { message?: string; error?: string }>>({});
 
   // Dismissal persistence (localStorage)
   const dismissedIdsRef = useRef<Set<string>>(new Set());
@@ -81,8 +109,20 @@ export default function DashboardPage() {
   // Normalize type strings like "Non-emergency:" → "non-emergency"
   const getTypeKey = (t?: string) => (t || "non-emergency").replace(/:\s*$/, "").trim().toLowerCase();
 
-  // Human-friendly label without trailing colon
-  const formatTypeLabel = (t?: string) => (t ? t.replace(/:\s*$/, "") : "Unknown");
+  // Human-friendly label without trailing colon; map known manual values
+  const formatTypeLabel = (t?: string) => {
+    if (!t) return "Unknown";
+    const normalized = t.trim().toLowerCase();
+    if (normalized in MANUAL_TYPE_LABEL) {
+      return MANUAL_TYPE_LABEL[normalized as ManualIncidentType];
+    }
+    return t.replace(/:\s*$/, "");
+  };
+
+  const formatTypeList = (tags?: string[]) => {
+    if (!tags || tags.length === 0) return null;
+    return tags.map((tag) => formatTypeLabel(tag)).join(" | ");
+  };
 
   // Map type → colors + icon path + fallback glyph
   const pinConfigFor = (typeKey: string) => {
@@ -312,11 +352,16 @@ export default function DashboardPage() {
     }
 
     setManualLocationError(null);
+    setManualTypeError(null);
     setIsGeocoding(true);
 
     try {
       let coords: google.maps.LatLngLiteral | null = null;
       let resolvedAddress = manualAddress.trim();
+
+      if (manualTypes.length === 0) {
+        throw new Error("Select at least one incident type.");
+      }
 
       if (hasCoords) {
         const lat = Number(manualLatitude);
@@ -344,10 +389,12 @@ export default function DashboardPage() {
         setPendingCenter(coords);
       }
 
+      const primaryType = manualTypes[0] ?? MANUAL_TYPE_OPTIONS[0].value;
       const manualEntry: Incident = {
         id: `manual-${Date.now()}`,
         createdAt: new Date().toISOString(),
-        emergencyType: "Manual",
+        emergencyType: primaryType,
+        emergencyTags: manualTypes,
         confidence: undefined,
         transcript: resolvedAddress ? `Operator note: ${resolvedAddress}` : undefined,
         location: { lat: coords.lat, lng: coords.lng, address: resolvedAddress || undefined },
@@ -359,9 +406,16 @@ export default function DashboardPage() {
       setManualLatitude("");
       setManualLongitude("");
       setManualAddress("");
+      setManualTypes([MANUAL_TYPE_OPTIONS[0].value]);
+      setManualTypeError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to center on that location.";
-      setManualLocationError(message);
+      if (message.toLowerCase().includes("incident type")) {
+        setManualTypeError(message);
+        setManualLocationError(null);
+      } else {
+        setManualLocationError(message);
+      }
     } finally {
       setIsGeocoding(false);
     }
@@ -506,21 +560,65 @@ export default function DashboardPage() {
     }, interval);
   };
 
-  const confirmIncident = async (id: string): Promise<Incident | null> => {
+  const confirmIncident = async (incident: Incident): Promise<Incident | null> => {
+    const payload: {
+      id?: string;
+      address?: string;
+      location?: Incident["location"];
+      emergencyType?: string;
+      emergencyTags?: string[];
+      transcript?: string;
+      notes?: string;
+      createdAt?: string;
+    } = {};
+    if (incident.id) payload.id = incident.id;
+    const address = incident.location?.address?.trim();
+    if (address) payload.address = address;
+    if (incident.location) payload.location = incident.location;
+    if (incident.emergencyType) payload.emergencyType = incident.emergencyType;
+    if (incident.emergencyTags?.length) payload.emergencyTags = incident.emergencyTags;
+    if (incident.transcript) payload.transcript = incident.transcript;
+    if (incident.transcript && !incident.notes) payload.notes = incident.transcript;
+    if (incident.notes) payload.notes = incident.notes;
+    if (incident.createdAt) payload.createdAt = incident.createdAt;
+
     try {
       const res = await fetch(`/api/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Confirmation failed");
       const data: Incident = await res.json();
 
-      setIncidents((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
-      setSelectedIncident((current) => (current && current.id === id ? { ...current, ...data } : current));
-      setUploadingId((curr) => (curr === id ? null : curr));
+      setIncidents((prev) => {
+        let hasMatch = false;
+        let next = prev.map((p) => {
+          if (p.id === data.id) {
+            hasMatch = true;
+            return { ...p, ...data };
+          }
+          return p;
+        });
+        if (!hasMatch) {
+          next = [data, ...next];
+        }
+        if (incident.id && incident.id.startsWith("manual-") && incident.id !== data.id) {
+          next = next.filter((p) => p.id !== incident.id);
+        }
+        return next;
+      });
 
-      if (pendingManualId === id) setPendingManualId(null);
+      setSelectedIncident((current) => {
+        if (!current) return current;
+        if (current.id === data.id) return { ...current, ...data };
+        if (current.id === incident.id && incident.id !== data.id) return { ...data };
+        return current;
+      });
+
+      setUploadingId((curr) => (curr === incident.id || curr === data.id ? null : curr));
+
+      if (pendingManualId === incident.id) setPendingManualId(null);
       return data;
     } catch (err) {
       console.error(err);
@@ -538,7 +636,7 @@ export default function DashboardPage() {
     if (!pendingManualIncident) return;
     setConfirmingManual(true);
     setConfirmManualError(null);
-    const result = await confirmIncident(pendingManualIncident.id);
+    const result = await confirmIncident(pendingManualIncident);
     if (result) {
       setPendingManualId(null);
     } else {
@@ -583,6 +681,40 @@ export default function DashboardPage() {
       setIsDeletingSelected(false);
       setSelectedIncident(null);
     }, 200);
+  };
+
+  const toggleServiceSelection = (incidentId: string, service: ResponseService) => {
+    setServiceSelections((prev) => {
+      const next = new Set(prev[incidentId] ?? []);
+      if (next.has(service)) next.delete(service);
+      else next.add(service);
+      return { ...prev, [incidentId]: Array.from(next) };
+    });
+    setDispatchNotices((prev) => ({ ...prev, [incidentId]: undefined }));
+  };
+
+  const handleDispatchServices = async (incident: Incident) => {
+    const selected = serviceSelections[incident.id] ?? [];
+    if (!selected.length) {
+      setDispatchNotices((prev) => ({ ...prev, [incident.id]: { error: "Pick at least one service." } }));
+      return;
+    }
+
+    setDispatchingServiceId(incident.id);
+    setDispatchNotices((prev) => ({ ...prev, [incident.id]: { message: undefined, error: undefined } }));
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      const labelList = selected
+        .map((key) => RESPONSE_SERVICE_OPTIONS.find((opt) => opt.key === key)?.label || key)
+        .join(", ");
+      setDispatchNotices((prev) => ({ ...prev, [incident.id]: { message: `Sent: ${labelList}` } }));
+    } catch (err) {
+      console.error(err);
+      setDispatchNotices((prev) => ({ ...prev, [incident.id]: { error: "Failed to dispatch services." } }));
+    } finally {
+      setDispatchingServiceId((curr) => (curr === incident.id ? null : curr));
+    }
   };
 
   return (
@@ -668,7 +800,9 @@ export default function DashboardPage() {
                   <div className="text-sm space-y-1">
                     <div>
                       <span className="text-neutral-500">Type:</span>{" "}
-                      <span className="text-black">{formatTypeLabel(inc.emergencyType)}</span>
+                      <span className="text-black">
+                        {inc.emergencyTags?.length ? formatTypeList(inc.emergencyTags) : formatTypeLabel(inc.emergencyType)}
+                      </span>
                       {typeof inc.confidence === "number" && <span className="ml-2 text-black">({Math.round((inc.confidence || 0) * 100)}%)</span>}
                     </div>
 
@@ -707,7 +841,7 @@ export default function DashboardPage() {
                     <MapPin className="w-4 h-4" /> View on map
                   </Button>
                   {cpuMode && inc.status === "needs_confirmation" && (
-                    <Button className="flex-1 justify-center bg-black text-white" onClick={() => confirmIncident(inc.id)}>
+                    <Button className="flex-1 justify-center bg-black text-white" onClick={() => confirmIncident(inc)}>
                       Confirm & Mark
                     </Button>
                   )}
@@ -754,43 +888,48 @@ export default function DashboardPage() {
                     setManualLongitude("");
                     setManualAddress("");
                     setManualLocationError(null);
+                    setManualTypes([MANUAL_TYPE_OPTIONS[0].value]);
+                    setManualTypeError(null);
                     setIsGeocoding(false);
                   }}
                 >
                   Clear
                 </Button>
               </div>
+              <div>
+                <label className="text-xs font-medium text-black">Incident type</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {MANUAL_TYPE_OPTIONS.map((option) => {
+                    const isActive = manualTypes.includes(option.value);
+                    console.log(option.value, isActive);
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setManualTypes((prev) => {
+                            const exists = prev.includes(option.value);
+                            if (exists) {
+                              if (prev.length === 1) return prev; // keep at least one selection
+                              return prev.filter((val) => val !== option.value);
+                            }
+                            return [...prev, option.value];
+                          });
+                          setManualTypeError(null);
+                        }}
+                        className={`rounded-2xl border px-3 py-1 text-sm transition ${
+                          isActive ? "bg-black text-white border-black" : "border-neutral-200 text-black hover:border-black/40"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {manualTypeError && <div className="text-xs text-red-600">{manualTypeError}</div>}
+              </div>
             </form>
           </div>
-
-          {pendingManualIncident && (
-            <div className="rounded-3xl bg-white border border-amber-200 shadow-xl p-4 pointer-events-auto">
-              <div className="text-sm font-semibold text-amber-900">Confirm new marker</div>
-              <p className="mt-1 text-xs text-neutral-600">Finalize the manual location you just added before it appears for other operators.</p>
-              <div className="mt-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2 text-sm">
-                <div className="font-medium text-neutral-800">{pendingManualIncident.location?.address || "Manual coordinates"}</div>
-                <div className="text-xs text-neutral-500">
-                  {pendingManualIncident.location ? `${pendingManualIncident.location.lat.toFixed(4)}, ${pendingManualIncident.location.lng.toFixed(4)}` : "No coordinates"}
-                </div>
-              </div>
-              {confirmManualError && <div className="mt-2 text-xs text-red-600">{confirmManualError}</div>}
-              <div className="mt-3 flex gap-2">
-                <Button className="bg-black text-white hover:opacity-90 flex-1 justify-center" type="button" onClick={handleConfirmPendingManual} disabled={confirmingManual}>
-                  {confirmingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm marker"}
-                </Button>
-                <Button
-                  type="button"
-                  className="flex-1 justify-center"
-                  onClick={() => {
-                    setPendingManualId(null);
-                    setConfirmManualError(null);
-                  }}
-                >
-                  Later
-                </Button>
-              </div>
-            </div>
-          )}
 
           <div className="rounded-3xl bg-white border border-neutral-200 shadow-xl p-4 pointer-events-auto">
             <div className="flex items-center justify-between">
@@ -813,7 +952,9 @@ export default function DashboardPage() {
                     <div className="text-sm font-medium truncate text-black">
                       {pin.location?.address || `${pin.location?.lat.toFixed(4)}, ${pin.location?.lng.toFixed(4)}`}
                     </div>
-                    <div className="text-xs text-black truncate">{formatTypeLabel(pin.emergencyType) || "Manual entry"}</div>
+                    <div className="text-xs text-black truncate">
+                      {pin.emergencyTags?.length ? formatTypeList(pin.emergencyTags) : formatTypeLabel(pin.emergencyType) || "Manual entry"}
+                    </div>
                   </div>
                   <ChevronRight className="w-4 h-4 text-neutral-400" />
                 </button>
@@ -839,7 +980,12 @@ export default function DashboardPage() {
                   <span className="text-neutral-500">Address:</span> <span className="text-black">{selectedIncident.location?.address || "—"}</span>
                 </div>
                 <div>
-                  <span className="text-neutral-500">Type:</span> <span className="text-black">{formatTypeLabel(selectedIncident.emergencyType) || "—"}</span>
+                  <span className="text-neutral-500">Type:</span>{" "}
+                  <span className="text-black">
+                    {selectedIncident.emergencyTags?.length
+                      ? formatTypeList(selectedIncident.emergencyTags)
+                      : formatTypeLabel(selectedIncident.emergencyType) || "—"}
+                  </span>
                 </div>
                 <div>
                   <span className="text-neutral-500">Coordinates:</span>{" "}
@@ -854,6 +1000,41 @@ export default function DashboardPage() {
                   <div>
                     <span className="text-neutral-500">Notes:</span> <span className="text-black">{selectedIncident.transcript}</span>
                   </div>
+                )}
+              </div>
+              <div className="mt-4 border border-neutral-100 rounded-2xl p-3 bg-neutral-50">
+                <div className="text-xs font-semibold text-neutral-600 uppercase">Dispatch services</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {RESPONSE_SERVICE_OPTIONS.map((service) => {
+                    const selections = serviceSelections[selectedIncident.id] ?? [];
+                    const isActive = selections.includes(service.key);
+                    return (
+                      <button
+                        key={service.key}
+                        type="button"
+                        className={`rounded-2xl border px-3 py-1 text-sm transition ${
+                          isActive ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-800 hover:border-black/50"
+                        }`}
+                        onClick={() => toggleServiceSelection(selectedIncident.id, service.key)}
+                      >
+                        {service.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Button
+                  className="mt-3 w-full justify-center bg-black text-white hover:opacity-90"
+                  type="button"
+                  disabled={dispatchingServiceId === selectedIncident.id}
+                  onClick={() => handleDispatchServices(selectedIncident)}
+                >
+                  {dispatchingServiceId === selectedIncident.id ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send units"}
+                </Button>
+                {dispatchNotices[selectedIncident.id]?.message && (
+                  <div className="mt-2 text-xs text-green-700">{dispatchNotices[selectedIncident.id]?.message}</div>
+                )}
+                {dispatchNotices[selectedIncident.id]?.error && (
+                  <div className="mt-2 text-xs text-red-600">{dispatchNotices[selectedIncident.id]?.error}</div>
                 )}
               </div>
               {selectedActionError && <div className="mt-2 text-xs text-red-600">{selectedActionError}</div>}
