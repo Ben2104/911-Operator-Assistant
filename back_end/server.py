@@ -1,20 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, Response, BackgroundTasks, Form
+from fastapi.middleware.cors import CORSMiddleware
 from twilio.twiml.voice_response import VoiceResponse
 from utils import transcribe, parse_event
-import time, io, requests,os
+import time, io, requests, os
 from fastapi.responses import JSONResponse
+from datetime import datetime, timezone
 
-events = [{
-  "Address": "Crystal Cove, Newport Beach, CA 92657, USA",
-  "Incident": "Medical",
-  "lat": "33.5765961",
-  "long": "-117.8417662",
-  "Response_time?": "7",
-  "Transcription": " Help, I went hiking in Crystal Cove and I broke my leg. I need medical right now, please. I broke my leg."
-}]
+events = []
 
 # top of file
-from datetime import datetime, timezone
 
 def normalize_event(e: dict) -> dict:
   lat = str(e.get("lat")) if e.get("lat") is not None else None
@@ -41,12 +35,28 @@ def normalize_event(e: dict) -> dict:
 
 app = FastAPI()
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (for development)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
+
+# Suppress favicon.ico 404 errors
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)  # No Content
+
 @app.get("/")
 def read_root():
     return {"message": "Hello, you have successfully contact OUR API"}
 
 @app.post("/incoming")
 async def incoming():
+    print("📞 Call started")
+    
     resp = VoiceResponse()
     resp.say("This is a nine one one simulator. What is your emergency.")
     
@@ -68,13 +78,13 @@ async def recording_complete(
     From: str = Form(None),
     To: str = Form(None),
 ):
+    print("🔄 Recording complete")
     
     background_tasks.add_task(update_transcript, RecordingUrl)
     return Response(status_code=204)
 
 
 def update_transcript(recording_url: str):
-    
     global event
     auth=(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
     mp3_url = recording_url + ".mp3"
@@ -86,7 +96,8 @@ def update_transcript(recording_url: str):
     }
     
     events.append(requests.post("http://127.0.0.1:8000/location",files=files).json())
-    
+    print(f"✅ Transcript ready. Total transcripts: {len(events)}")
+
 @app.get('/get-transcript')
 async def get_transcript():
     global events

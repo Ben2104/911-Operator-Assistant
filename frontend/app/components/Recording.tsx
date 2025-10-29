@@ -1,51 +1,96 @@
+"use client"
+import React, { useState, useRef } from 'react'
 
-import { Upload, Loader2 } from "lucide-react";
-
-interface UploadProps {
-    uploadingId: string | null;
-    handleUploadInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
+type RecordingProps = {
+  onRecordingComplete?: (blob: Blob, filename: string) => void
+  onError?: (error: string) => void
 }
 
-function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`rounded-2xl border border-neutral-200 shadow-sm bg-white ${className}`}>{children}</div>;
-}
-function Button({ className = "", children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+const Recording: React.FC<RecordingProps> = ({
+  onRecordingComplete,
+  onError,
+}) => {
+  const [isRecording, setIsRecording] = useState(false)
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      
+      chunksRef.current = []
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        const filename = `call-${Date.now()}.webm`
+        onRecordingComplete?.(blob, filename)
+        chunksRef.current = []
+        
+        // Stop all tracks
+        stream.getTracks().forEach((track) => track.stop())
+      }
+
+      mediaRecorder.start()
+      setRecorder(mediaRecorder)
+      setIsRecording(true)
+    } catch (error) {
+      const message = 'Microphone access failed. Check permissions.'
+      onError?.(message)
+      console.error(error)
+    }
+  }
+
+  const stopRecording = () => {
+    if (!recorder) {
+      console.log('⚠️ No recorder to stop')
+      return
+    }
+    console.log('🎤 Stopping recording...')
+    recorder.stop()
+    setIsRecording(false)
+    setRecorder(null)
+  }
+
   return (
-    <button
-      className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2 shadow-sm border border-neutral-200 hover:shadow transition active:translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
+    <div>
+      {!isRecording ? (
+        <button
+          onClick={startRecording}
+          type="button"
+          className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium text-white bg-black hover:opacity-90 transition shadow-sm border border-neutral-200 hover:shadow active:translate-y-px"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+          Start
+        </button>
+      ) : (
+        <button
+          onClick={stopRecording}
+          type="button"
+          className="inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium text-white bg-red-600 hover:opacity-90 transition shadow-sm border border-red-200 hover:shadow active:translate-y-px"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+          Stop
+        </button>
+      )}
+      <p className="mt-2 text-xs text-neutral-500">
+        Record, then submit for transcription + analysis.
+      </p>
+    </div>
+  )
 }
-const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-    <h3 className="font-semibold">{children}</h3>
-);
 
-export default function Recording({ uploadingId, handleUploadInput }: UploadProps) {
-    return (
-        <Card className="p-4">
-            <SectionTitle>Upload Call Recording</SectionTitle>
-            <div className="mt-3 flex items-center gap-3">
-                <label className="relative inline-flex items-center">
-                    <input
-                        type="file"
-                        accept="audio/*"
-                        className="hidden"
-                        onChange={handleUploadInput}
-                    />
-                    <Button className="bg-black text-white hover:opacity-90">
-                        <Upload className="w-4 h-4" /> Choose file
-                    </Button>
-                </label>
-                {uploadingId && (
-                    <div className="flex items-center gap-2 text-sm text-neutral-600">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Processing #{uploadingId}
-                    </div>
-                )}
-            </div>
-            <p className="mt-2 text-xs text-neutral-500">Supported: .mp3, .wav, .m4a, .webm</p>
-        </Card>
-    );
-}
+export default Recording
