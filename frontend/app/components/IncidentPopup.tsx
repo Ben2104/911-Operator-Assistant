@@ -66,7 +66,7 @@ const IncidentPopup: React.FC<IncidentPopupProps> = ({ incident, onClose, onRemo
               Location
             </div>
             <div className="text-sm text-neutral-700 flex items-start gap-2">
-              <MapPin className="w-4 h-4 mt-0.5 text-neutral-400 flex-shrink-0" />
+              <MapPin className="w-4 h-4 mt-0.5 text-neutral-400 shrink-0" />
               <span>{incident.Address || 'No address available'}</span>
             </div>
           </div>
