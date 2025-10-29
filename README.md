@@ -31,7 +31,7 @@ You will also need API credentials:
 
 ```bash
 git clone [Github Repository URL]
-cd Marina-Hacks2
+cd 911-Operator-Assistant
 ```
 
 
@@ -113,7 +113,7 @@ cd Marina-Hacks2
    | `/incoming` | POST | Twilio entry point that records callers |
    | `/recording-complete` | POST | Twilio recording callback |
 
-5. **Connecting both services**
+## 4. **Connecting both services**
 
 1. Start the backend (`uvicorn ...`) so `/location` is reachable at `http://127.0.0.1:8000/location`.
 2. Run `npm run dev` (frontend). Manual uploads and live recordings will be forwarded to the FastAPI service, and the confirmed incidents will appear on the map.
