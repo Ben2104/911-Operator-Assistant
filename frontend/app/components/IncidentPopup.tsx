@@ -35,7 +35,7 @@ const IncidentPopup: React.FC<IncidentPopupProps> = ({ incident, onClose, onRemo
     <div className="fixed top-4 right-4 w-96 z-50 animate-in slide-in-from-right duration-300">
       <div className="rounded-2xl border border-neutral-200 shadow-2xl bg-white overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-neutral-900 to-neutral-700 px-4 py-3 flex items-center justify-between">
+        <div className="bg-linear-to-r from-neutral-900 to-neutral-700 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MapPin className="w-5 h-5 text-white" />
             <h3 className="text-white font-semibold text-sm">Incident Details</h3>
