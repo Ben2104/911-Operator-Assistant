@@ -341,10 +341,6 @@ const Map: React.FC<MapProps> = ({ incidents = [], focusIncident, confirmedIncid
             Manual Address
           </button>
         )}
-        <RecentPins
-          pins={recentPins}
-          onPinClick={focusLocation}
-        />
       </div>
 
       {/* Incident Popup */}

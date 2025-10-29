@@ -24,8 +24,17 @@ type IncidentCardProps = {
 const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onViewOnMap }) => {
   const isConfirmed = incident.confirmed || false
 
+  const handleCardClick = () => {
+    if (onViewOnMap) {
+      onViewOnMap()
+    }
+  }
+
   return (
-    <div className="rounded-2xl border border-neutral-200 shadow-sm bg-white p-3">
+    <div 
+      onClick={handleCardClick}
+      className="rounded-2xl border border-neutral-200 shadow-sm bg-white p-3 cursor-pointer hover:shadow-md hover:border-neutral-300 transition-all"
+    >
       <div className="space-y-3">
         <div className="space-y-1">
           <div className="text-sm font-semibold text-neutral-900">
@@ -42,7 +51,10 @@ const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onView
         {/* Action Buttons */}
         <div className="flex gap-2">
           <button
-            onClick={onConfirm}
+            onClick={(e) => {
+              e.stopPropagation() // Prevent card click when clicking button
+              onConfirm?.()
+            }}
             disabled={isConfirmed}
             className={`flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition shadow-sm ${
               isConfirmed 
@@ -54,7 +66,10 @@ const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onView
             {isConfirmed ? 'Confirmed' : 'Confirm'}
           </button>
           <button
-            onClick={onViewOnMap}
+            onClick={(e) => {
+              e.stopPropagation() // Prevent card click when clicking button
+              onViewOnMap?.()
+            }}
             className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium bg-black text-white hover:opacity-90 transition shadow-sm"
           >
             <MapPin className="w-3.5 h-3.5" />
