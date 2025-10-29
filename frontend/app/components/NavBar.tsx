@@ -13,7 +13,7 @@ const NavBar: React.FC = () => {
     ];
 
     return (
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center py-4 backdrop-blur-sm">
             <PillNav
                 items={items}
                 className="custom-nav"

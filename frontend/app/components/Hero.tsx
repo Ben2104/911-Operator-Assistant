@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 
 const Hero = () => {
     return (
-        <div id="hero" className="flex flex-col items-center justify-center text-center -mt-100 px-4 text-xl">
+        <div id="hero" className="flex flex-col items-center justify-center text-center px-4 text-xl min-h-screen">
             <motion.div 
                 className="flex items-center gap-3"
                 initial={{ opacity: 0, y: 20 }}

@@ -7,9 +7,9 @@ import Product from "./components/Product";
 import TeamSection from "./components/TeamSection";
 export default function Home() {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh' }}>
       <NavBar />
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3rem', marginTop: '-4rem' }}>
+      <main>
         <Hero/>
         <About/>
         <Solution/>
