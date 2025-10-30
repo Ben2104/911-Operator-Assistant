@@ -21,6 +21,7 @@ type RecentCallsProps = {
   isProcessing: boolean
   onConfirmIncident?: (incident: Incident, index: number) => void
   onViewOnMap?: (incident: Incident, index: number) => void
+  onDeleteIncident?: (incident: Incident, index: number) => void
 }
 
 function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
@@ -31,7 +32,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="text-sm font-semibold tracking-wide text-neutral-500 uppercase">{children}</div>
 }
 
-const RecentCalls: React.FC<RecentCallsProps> = ({ incidents, isProcessing, onConfirmIncident, onViewOnMap }) => {
+const RecentCalls: React.FC<RecentCallsProps> = ({ incidents, isProcessing, onConfirmIncident, onViewOnMap, onDeleteIncident }) => {
   return (
     <div>
       <SectionTitle>Recent Calls</SectionTitle>
@@ -55,6 +56,7 @@ const RecentCalls: React.FC<RecentCallsProps> = ({ incidents, isProcessing, onCo
             incident={incident}
             onConfirm={() => onConfirmIncident?.(incident, index)}
             onViewOnMap={() => onViewOnMap?.(incident, index)}
+            onDelete={() => onDeleteIncident?.(incident, index)}
           />
         ))}
       </div>

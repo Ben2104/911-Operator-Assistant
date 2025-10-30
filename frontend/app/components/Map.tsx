@@ -4,7 +4,6 @@ import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
 import { Loader2, MapPin } from 'lucide-react'
 import IncidentPopup from './IncidentPopup'
 import ManualAddress from './ManualAddress'
-import RecentPins from './RecentPins'
 
 type Location = {
   lat: number
@@ -60,7 +59,7 @@ const Map: React.FC<MapProps> = ({ incidents = [], focusIncident, confirmedIncid
         if (cancelled || !mapRef.current) return
 
         const m = new google.maps.Map(mapRef.current, {
-          center: { lat: 37.7749, lng: -122.4194 }, // San Francisco
+          center: { lat: 33.7701, lng: -118.1937 }, // Long Beach, CA
           zoom: 11,
           mapId: '911-ops-map',
           disableDefaultUI: false,

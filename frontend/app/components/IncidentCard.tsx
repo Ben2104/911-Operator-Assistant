@@ -19,9 +19,10 @@ type IncidentCardProps = {
   incident: Incident
   onConfirm?: () => void
   onViewOnMap?: () => void
+  onDelete?: () => void
 }
 
-const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onViewOnMap }) => {
+const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onViewOnMap, onDelete }) => {
   const isConfirmed = incident.confirmed || false
 
   const handleCardClick = () => {
@@ -75,9 +76,22 @@ const IncidentCard: React.FC<IncidentCardProps> = ({ incident, onConfirm, onView
             <MapPin className="w-3.5 h-3.5" />
             View on Map
           </button>
+          </div>
+          
+          {/* Delete Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation() // Prevent card click when clicking button
+              onDelete?.()
+            }}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium bg-red-600 text-white hover:bg-red-700 transition shadow-sm"
+          >
+            Delete
+          </button>
+
         </div>
       </div>
-    </div>
+
   )
 }
 

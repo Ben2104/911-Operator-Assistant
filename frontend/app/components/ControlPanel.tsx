@@ -215,6 +215,21 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ onIncidentUpdate, onViewInc
         onViewIncidentOnMap?.(incident)
     }
 
+    const handleDeleteIncident = (incident: Incident, index: number) => {
+        console.log('Delete incident:', incident)
+        
+        // Remove the incident from the list
+        const updatedIncidents = incidents.filter((_, idx) => idx !== index)
+        
+        // Update local state if not using external incidents
+        if (externalIncidents === undefined) {
+            setLocalIncidents(updatedIncidents)
+        }
+        
+        // Always notify parent
+        onIncidentUpdate?.(updatedIncidents)
+    }
+
     return (
         <div className="p-4 flex flex-col gap-4">
             {/* Header */}
@@ -274,6 +289,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ onIncidentUpdate, onViewInc
                 isProcessing={!!uploadingId}
                 onConfirmIncident={handleConfirmIncident}
                 onViewOnMap={handleViewOnMap}
+                onDeleteIncident={handleDeleteIncident}
             />
         </div>
     )
