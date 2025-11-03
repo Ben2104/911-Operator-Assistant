@@ -1,7 +1,8 @@
 # 911 Operator Assistance
 
-A prototype 911 operator co-pilot built during Marina Hacks. The system pairs a Next.js dashboard with a FastAPI inference service that transcribes audio, classifies incidents, geocodes caller locations, and lets dispatchers confirm markers or request field units.
+A prototype 911 operator co-pilot built during Marina Hacks 5.0. The system pairs a Next.js dashboard with a FastAPI inference service that transcribes audio, classifies incidents, geocodes caller locations, and lets dispatchers confirm markers or request field units.
 
+<a href="https://devpost.com/software/911-operator-assistant">Devpost Submission</a>
 ## Repository Structure
 
 ```
